@@ -190,8 +190,12 @@ export default async function PlanPage() {
       {plan.cowCount === 0 && (
         <Missing text="Il n'y a pas encore de vache dans le troupeau." href="/vaches" action="Ajouter des vaches" />
       )}
-      {plan.bullCount === 0 && (
-        <Missing text="Le catalogue de taureaux est vide." href="/taureaux" action="Ajouter des taureaux" />
+      {plan.cowCount > 0 && plan.bullCount === 0 && (
+        <Missing
+          text="Aucun taureau du catalogue pour les races de ton troupeau. Vérifie la race de tes vaches, ou importe un catalogue."
+          href="/taureaux"
+          action="Voir le catalogue"
+        />
       )}
       {plan.activeGoals.length === 0 && (
         <Missing

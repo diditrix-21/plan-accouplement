@@ -121,6 +121,22 @@ await as(BOB, async () => {
   );
 });
 
+// Import de catalogue : même vendeur + même identité = mise à jour, pas de doublon
+const UPSERT = (name, price) => `
+  insert into public.bulls (name, herdbook_id, supplier_id, breed_code, price_chf, eval_base)
+  values ('${name}', 'CH 120.0000.0001.1', (select id from public.suppliers where name = 'Swissgenetics'), 'AN', ${price}, 'GA HO 08.26')
+  on conflict (supplier_id, herdbook_id) do update
+    set name = excluded.name, price_chf = excluded.price_chf, eval_base = excluded.eval_base;`;
+await as(ALICE, async () => {
+  await db.exec(UPSERT("CATALOGUE", 40));
+  await db.exec(UPSERT("CATALOGUE", 45));
+  const rows = (await db.query(`select price_chf::int as price from public.bulls where herdbook_id = 'CH 120.0000.0001.1'`)).rows;
+  check("réimporter un catalogue met à jour le taureau au lieu de le dupliquer", rows.length === 1 && rows[0].price === 45);
+});
+await as(BOB, async () => {
+  await expectError("Bob ne peut pas écraser le catalogue importé par Alice", UPSERT("PIRATE", 1));
+});
+
 // Suppression en cascade
 await db.exec(`delete from auth.users where id = '${ALICE}';`);
 const leftovers = await db.query(`

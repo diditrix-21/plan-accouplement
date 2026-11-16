@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getFarm, loadBulls, loadCows, loadGoals, requireUser } from "@/lib/data";
+import { countBulls, getFarm, loadCows, loadGoals, requireUser } from "@/lib/data";
 
 function Step({
   number,
@@ -41,13 +41,13 @@ function Step({
 export default async function HomePage() {
   const { supabase } = await requireUser();
   const farm = await getFarm(supabase);
-  const [cows, bulls, goals] = await Promise.all([
+  const [cows, bullCount, goals] = await Promise.all([
     loadCows(supabase, farm.id),
-    loadBulls(supabase),
+    countBulls(supabase),
     loadGoals(supabase, farm.id),
   ]);
   const goalCount = Object.values(goals).filter((weight) => weight > 0).length;
-  const ready = cows.length > 0 && bulls.length > 0 && goalCount > 0;
+  const ready = cows.length > 0 && bullCount > 0 && goalCount > 0;
 
   return (
     <>
@@ -68,10 +68,10 @@ export default async function HomePage() {
         <Step
           number={2}
           title="Le catalogue de taureaux"
-          status={bulls.length === 0 ? "Catalogue vide" : `${bulls.length} taureau(x), tous vendeurs confondus`}
-          done={bulls.length > 0}
+          status={bullCount === 0 ? "Catalogue vide" : `${bullCount} taureau(x), tous vendeurs confondus`}
+          done={bullCount > 0}
           href="/taureaux"
-          action={bulls.length === 0 ? "Ajouter des taureaux" : "Voir le catalogue"}
+          action={bullCount === 0 ? "Ajouter des taureaux" : "Voir le catalogue"}
         />
         <Step
           number={3}

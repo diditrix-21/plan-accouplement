@@ -36,6 +36,10 @@ export type BullRow = {
   price_sexed_chf: number | null;
   is_example: boolean;
   created_by: string | null;
+  /** Nom complet, base des valeurs d'élevage (« GA HO 08.26 »), sans cornes : remplis par l'import de catalogue. */
+  full_name: string | null;
+  eval_base: string | null;
+  polled: "PP" | "Pp" | null;
   supplier: { name: string } | null;
   breed: { name: string; breed_group: string } | null;
   bull_traits: { trait_code: string; value: number }[];
@@ -108,15 +112,52 @@ export async function loadSuppliers(supabase: Supabase): Promise<SupplierRow[]> 
   return (data ?? []) as SupplierRow[];
 }
 
-export async function loadBulls(supabase: Supabase): Promise<BullRow[]> {
-  const { data, error } = await supabase
-    .from("bulls")
-    .select(
-      "*, supplier:suppliers(name), breed:breeds(name, breed_group), bull_traits(trait_code, value)",
-    )
-    .order("name");
+export type BullFilter = {
+  /** Limite aux races données (codes). Liste vide = aucun taureau. */
+  breedCodes?: string[];
+  supplierId?: string;
+  /** Recherche dans le nom court ou complet. */
+  search?: string;
+};
+
+/**
+ * Charge les taureaux avec leurs critères. L'API Supabase renvoie au plus
+ * 1000 lignes par requête : on lit donc par pages pour ne perdre personne.
+ */
+export async function loadBulls(supabase: Supabase, filter: BullFilter = {}): Promise<BullRow[]> {
+  if (filter.breedCodes && filter.breedCodes.length === 0) return [];
+
+  const pageSize = 500;
+  const bulls: BullRow[] = [];
+  for (let from = 0; ; from += pageSize) {
+    let query = supabase
+      .from("bulls")
+      .select(
+        "*, supplier:suppliers(name), breed:breeds(name, breed_group), bull_traits(trait_code, value)",
+      )
+      .order("name")
+      .order("id")
+      .range(from, from + pageSize - 1);
+    if (filter.breedCodes) query = query.in("breed_code", filter.breedCodes);
+    if (filter.supplierId) query = query.eq("supplier_id", filter.supplierId);
+    if (filter.search) {
+      // Les caractères spéciaux de la syntaxe de filtre sont retirés de la recherche.
+      const term = filter.search.replace(/[%_,()*\\]/g, " ").trim();
+      if (term) query = query.or(`name.ilike.%${term}%,full_name.ilike.%${term}%`);
+    }
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    bulls.push(...((data ?? []) as unknown as BullRow[]));
+    if (!data || data.length < pageSize) break;
+  }
+  return bulls;
+}
+
+/** Nombre de taureaux du catalogue, sans les charger. */
+export async function countBulls(supabase: Supabase): Promise<number> {
+  const { count, error } = await supabase.from("bulls").select("id", { count: "exact", head: true });
   if (error) throw new Error(error.message);
-  return (data ?? []) as unknown as BullRow[];
+  return count ?? 0;
 }
 
 export async function loadCows(supabase: Supabase, farmId: string): Promise<CowRow[]> {

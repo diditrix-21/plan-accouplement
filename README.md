@@ -34,6 +34,30 @@ développement : Authentication → Sign In / Providers → Email → désactive
 | Objectifs | Un poids de 0 à 5 par critère (« qu'est-ce que tu veux améliorer en premier ») + règles |
 | Plan | Pour chaque vache : les 3 meilleurs taureaux, pourquoi, et les doses à prévoir |
 
+## Importer le catalogue Swissgenetics
+
+Sur le site Swissgenetics, exporte la liste des taureaux de chaque race en CSV. Dans l'appli :
+**Taureaux → Importer → Importer le catalogue Swissgenetics**, sélectionne tous les fichiers d'un
+coup. Un taureau déjà présent (même identité) est mis à jour : refais l'import après chaque
+estimation des valeurs d'élevage (avril, août, décembre).
+
+Ce qui est repris (`src/lib/swissgenetics.ts`) :
+
+- nom, identité, race, père, grand-père maternel, prix (dose normale et sexée), sans cornes,
+  caséines, base des valeurs d'élevage (colonne « VE ») ;
+- les critères de l'appli, selon la base du taureau :
+  - **base suisse** (« G/GA/GI … ») et Allemagne/Autriche : valeurs telles quelles ;
+  - **France** (Montbéliarde) : fonctionnels publiés en écarts-types (0 ± 1) → `100 + 12 × valeur` ;
+  - **Canada** (Jersey) : fonctionnels 100 ± 5 et conformation 0 ± 5 → échelle 100 ± 12 ;
+  - **pays nordiques** (Jersey) : index 100 ± 10 → échelle 100 ± 12, production (publiée en
+    index) non reprise ;
+  - **base non indiquée** (races à viande, races spéciales) : taureau importé sans critères.
+
+Limites : la conversion des bases étrangères est une approximation (les populations de référence
+diffèrent) ; la facilité de naissance/vêlage française n'est pas reprise (échelle non confirmée) ;
+les index globaux (ISET, VEG, IPL…) et les critères viande ne sont pas encore dans l'appli ; le
+catalogue appartient au compte qui l'a importé, lui seul peut le mettre à jour.
+
 ## Comment le plan est calculé
 
 Tout est dans `src/lib/mating.ts` (fonctions pures, testées dans `mating.test.ts`).

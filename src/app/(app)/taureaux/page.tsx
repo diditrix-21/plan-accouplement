@@ -14,7 +14,10 @@ import {
   type TraitRow,
 } from "@/lib/data";
 import { formatChf } from "@/lib/forms";
-import { deleteBull, importBulls, saveBull } from "./actions";
+import { deleteBull, importBulls, importCatalog, saveBull } from "./actions";
+
+/** Au-delà, on demande de filtrer plutôt que d'afficher un tableau interminable. */
+const MAX_ROWS = 300;
 
 function BullForm({
   bull,
@@ -126,6 +129,38 @@ function BullForm({
   );
 }
 
+function CatalogImportForm() {
+  return (
+    <form action={importCatalog} className="card mb-6 space-y-3">
+      <h2 className="text-lg font-semibold">Importer le catalogue Swissgenetics</h2>
+      <p className="text-sm text-stone-600">
+        Choisis les fichiers CSV exportés depuis le site Swissgenetics (un par race, tu peux en
+        sélectionner plusieurs d&apos;un coup). Un taureau déjà présent est mis à jour : refais
+        l&apos;import après chaque nouvelle estimation des valeurs d&apos;élevage.
+      </p>
+      <input
+        className="input"
+        type="file"
+        name="files"
+        accept=".csv,text/csv"
+        multiple
+        required
+      />
+      <p className="text-xs text-stone-500">
+        Les valeurs suisses sont reprises telles quelles. Les valeurs sur base étrangère (France,
+        Canada, pays nordiques) sont ramenées à l&apos;échelle suisse : c&apos;est une approximation.
+        Les races sans base indiquée sont importées sans critères.
+      </p>
+      <div className="flex gap-3">
+        <button className="btn">Importer le catalogue</button>
+        <Link href="/taureaux" className="btn-secondary">
+          Annuler
+        </Link>
+      </div>
+    </form>
+  );
+}
+
 function ImportForm({ traits }: { traits: TraitRow[] }) {
   return (
     <form action={importBulls} className="card mb-6 space-y-3">
@@ -168,19 +203,23 @@ function first(value: string | string[] | undefined): string | undefined {
 export default async function BullsPage({ searchParams }: PageProps<"/taureaux">) {
   const params = await searchParams;
   const { supabase, user } = await requireUser();
+  const race = first(params.race);
+  const vendeur = first(params.vendeur);
+  const search = first(params.q);
   const [bulls, traits, breeds, suppliers] = await Promise.all([
-    loadBulls(supabase),
+    loadBulls(supabase, {
+      breedCodes: race ? [race] : undefined,
+      supplierId: vendeur,
+      search,
+    }),
     loadTraits(supabase),
     loadBreeds(supabase),
     loadSuppliers(supabase),
   ]);
 
   const editing = bulls.find((b) => b.id === first(params.edit) && b.created_by === user.id);
-  const race = first(params.race);
-  const vendeur = first(params.vendeur);
-  const visible = bulls.filter(
-    (b) => (!race || b.breed_code === race) && (!vendeur || b.supplier_id === vendeur),
-  );
+  const visible = bulls.slice(0, MAX_ROWS);
+  const catalog = first(params.catalog);
   const imported = first(params.imported);
 
   return (
@@ -205,6 +244,15 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
           {first(params.unknown) !== "0" && `, ${first(params.unknown)} colonne(s) non reconnue(s)`}.
         </p>
       )}
+      {catalog !== undefined && (
+        <p className="notice-ok mb-4">
+          Catalogue importé : {catalog} taureau(x), {first(params.values) ?? 0} valeur(s)
+          d&apos;élevage
+          {first(params.novalues) !== "0" &&
+            `, dont ${first(params.novalues)} taureau(x) sans critères (races à viande ou base non indiquée)`}
+          .
+        </p>
+      )}
       {bulls.some((b) => b.is_example) && (
         <p className="notice mb-4">
           Les taureaux « EXEMPLE » sont inventés pour tester l&apos;appli. Leurs valeurs ne
@@ -212,7 +260,12 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
         </p>
       )}
 
-      {params.import && <ImportForm traits={traits} />}
+      {params.import && (
+        <>
+          <CatalogImportForm />
+          <ImportForm traits={traits} />
+        </>
+      )}
       {(editing || params.add) && (
         <BullForm bull={editing} traits={traits} breeds={breeds} suppliers={suppliers} />
       )}
@@ -244,8 +297,21 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
             ))}
           </select>
         </div>
+        <div>
+          <label className="label" htmlFor="q">
+            Nom
+          </label>
+          <input className="input" id="q" name="q" defaultValue={search ?? ""} placeholder="ex. ORKAN" />
+        </div>
         <button className="btn-secondary">Filtrer</button>
       </form>
+
+      <p className="mb-3 text-sm text-stone-600">
+        {bulls.length} taureau(x)
+        {bulls.length > MAX_ROWS &&
+          ` — les ${MAX_ROWS} premiers sont affichés, filtre par race ou par nom pour voir les autres`}
+        .
+      </p>
 
       {visible.length === 0 ? (
         <p className="card text-sm text-stone-700">Aucun taureau ne correspond.</p>
@@ -266,7 +332,13 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
             <tbody className="divide-y divide-stone-100">
               {visible.map((bull) => (
                 <tr key={bull.id}>
-                  <td className="px-4 py-3 font-medium">{bull.name}</td>
+                  <td className="px-4 py-3">
+                    <span className="font-medium">{bull.name}</span>
+                    {bull.polled && <span className="ml-1 text-xs text-stone-500">{bull.polled}</span>}
+                    {bull.full_name && bull.full_name !== bull.name && (
+                      <span className="block text-xs text-stone-500">{bull.full_name}</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">{bull.breed?.name ?? "—"}</td>
                   <td className="px-4 py-3">{bull.supplier?.name ?? "—"}</td>
                   <td className="px-4 py-3 text-stone-600">
@@ -275,6 +347,9 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
                   <td className="px-4 py-3">{formatChf(bull.price_chf)}</td>
                   <td className="px-4 py-3 text-stone-600">
                     {bull.bull_traits.length} / {traits.length}
+                    {bull.eval_base && (
+                      <span className="block text-xs text-stone-500">base {bull.eval_base}</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {bull.created_by === user.id && (

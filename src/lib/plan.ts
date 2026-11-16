@@ -1,5 +1,6 @@
 import {
   getFarm,
+  loadBreeds,
   loadBulls,
   loadCows,
   loadGoals,
@@ -49,12 +50,18 @@ function toBull(row: BullRow): Bull {
 /** Charge le troupeau, le catalogue et les objectifs, puis calcule le plan. */
 export async function buildPlan(supabase: Supabase) {
   const farm = await getFarm(supabase);
-  const [traitRows, cowRows, bullRows, goals] = await Promise.all([
+  const [traitRows, cowRows, breeds, goals] = await Promise.all([
     loadTraits(supabase),
     loadCows(supabase, farm.id),
-    loadBulls(supabase),
+    loadBreeds(supabase),
     loadGoals(supabase, farm.id),
   ]);
+
+  // Le catalogue compte plus de mille taureaux : on ne charge que ceux des
+  // races (et races apparentées) présentes dans le troupeau.
+  const herdGroups = new Set(cowRows.map((c) => c.breed?.breed_group).filter(Boolean));
+  const breedCodes = breeds.filter((b) => herdGroups.has(b.breed_group)).map((b) => b.code);
+  const bullRows = await loadBulls(supabase, { breedCodes });
 
   const traits: Trait[] = traitRows.map((t) => ({
     code: t.code,
