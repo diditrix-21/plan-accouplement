@@ -1,0 +1,87 @@
+import {
+  getFarm,
+  loadBulls,
+  loadCows,
+  loadGoals,
+  loadTraits,
+  valuesByCode,
+  type BullRow,
+  type CowRow,
+} from "@/lib/data";
+import {
+  DEFAULT_OPTIONS,
+  bullCap,
+  dosesNeeded,
+  planForHerd,
+  type Bull,
+  type Cow,
+  type Trait,
+} from "@/lib/mating";
+import type { createClient } from "@/lib/supabase/server";
+
+type Supabase = Awaited<ReturnType<typeof createClient>>;
+
+function toCow(row: CowRow): Cow {
+  return {
+    id: row.id,
+    name: row.name,
+    breedGroup: row.breed?.breed_group ?? null,
+    sireName: row.sire_name,
+    mgsName: row.mgs_name,
+    values: valuesByCode(row.cow_traits),
+    isHeifer: row.lactation_no === 0,
+  };
+}
+
+function toBull(row: BullRow): Bull {
+  return {
+    id: row.id,
+    name: row.name,
+    breedGroup: row.breed?.breed_group ?? null,
+    sireName: row.sire_name,
+    mgsName: row.mgs_name,
+    values: valuesByCode(row.bull_traits),
+    supplier: row.supplier?.name ?? null,
+    priceChf: row.price_chf === null ? null : Number(row.price_chf),
+  };
+}
+
+/** Charge le troupeau, le catalogue et les objectifs, puis calcule le plan. */
+export async function buildPlan(supabase: Supabase) {
+  const farm = await getFarm(supabase);
+  const [traitRows, cowRows, bullRows, goals] = await Promise.all([
+    loadTraits(supabase),
+    loadCows(supabase, farm.id),
+    loadBulls(supabase),
+    loadGoals(supabase, farm.id),
+  ]);
+
+  const traits: Trait[] = traitRows.map((t) => ({
+    code: t.code,
+    label: t.label,
+    mean: t.mean,
+    sd: t.sd,
+    direction: t.direction,
+  }));
+  const activeGoals = traitRows
+    .filter((t) => (goals[t.code] ?? 0) > 0)
+    .map((t) => ({ label: t.label, weight: goals[t.code] }))
+    .sort((a, b) => b.weight - a.weight);
+
+  const plans = planForHerd(cowRows.map(toCow), bullRows.map(toBull), traits, goals, {
+    ...DEFAULT_OPTIONS,
+    heiferMinCalvingEase: Number(farm.heifer_min_calving_ease),
+    maxBullShare: Number(farm.max_bull_share),
+  });
+
+  return {
+    farm,
+    cowCount: cowRows.length,
+    bullCount: bullRows.length,
+    hasExampleBulls: bullRows.some((b) => b.is_example),
+    activeGoals,
+    plans,
+    cap: bullCap(plans.filter((p) => p.chosen).length, Number(farm.max_bull_share)),
+    doses: dosesNeeded(plans),
+  };
+}

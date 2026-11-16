@@ -1,0 +1,7 @@
+[build]
+  command = "npm run build"
+
+# Variables publiques : l'URL du projet et la clé « publishable », faites pour le navigateur.
+[build.environment]
+  NEXT_PUBLIC_SUPABASE_URL = "https://xvzlqxpvrrnjrnjzelfg.supabase.co"
+  NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_z6hiXEkrIw_gy2lql0d_VA__9WLX3nl"
