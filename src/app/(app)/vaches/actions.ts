@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getFarm, loadTraits, requireUser, type TraitRow } from "@/lib/data";
+import { getFarm, loadBreeds, loadTraits, requireUser, type TraitRow } from "@/lib/data";
+import { isHerdList, parseHerdList } from "@/lib/herd";
 import { number, text } from "@/lib/forms";
 
 type TraitValue = { trait_code: string; value: number; estimated: boolean };
@@ -121,4 +122,76 @@ export async function addExampleCows() {
 
   revalidatePath("/", "layout");
   redirect("/vaches?message=saved");
+}
+
+/**
+ * Import de la « liste des animaux » swissherdbook (Excel). Une vache déjà
+ * présente (même N° BDTA) est mise à jour ; ses critères saisis ne bougent pas.
+ */
+export async function importHerd(form: FormData) {
+  const { supabase } = await requireUser();
+  const farm = await getFarm(supabase);
+
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size === 0) redirect("/vaches?import=1&message=nofile");
+
+  const { default: ExcelJS } = await import("exceljs");
+  const workbook = new ExcelJS.Workbook();
+  try {
+    await workbook.xlsx.load(await file.arrayBuffer());
+  } catch {
+    redirect("/vaches?import=1&message=herd_format");
+  }
+  const sheet = workbook.worksheets[0];
+  const lines: unknown[][] = [];
+  sheet?.eachRow({ includeEmpty: false }, (row) => {
+    // ExcelJS numérote les colonnes à partir de 1.
+    lines.push((row.values as unknown[]).slice(1));
+  });
+  if (lines.length < 2 || !isHerdList(lines[0])) redirect("/vaches?import=1&message=herd_format");
+
+  const breeds = await loadBreeds(supabase);
+  const herd = parseHerdList(lines[0], lines.slice(1), new Set(breeds.map((b) => b.code)));
+
+  const { data: existing, error: readError } = await supabase
+    .from("cows")
+    .select("id, ear_tag")
+    .eq("farm_id", farm.id);
+  if (readError) redirect("/vaches?import=1&message=error");
+  const idByTag = new Map(
+    (existing ?? []).filter((c) => c.ear_tag).map((c) => [c.ear_tag as string, c.id as string]),
+  );
+
+  let created = 0;
+  const rows = herd.animals.map((animal) => {
+    let id = idByTag.get(animal.earTag);
+    if (!id) {
+      id = crypto.randomUUID();
+      created += 1;
+    }
+    return {
+      id,
+      farm_id: farm.id,
+      name: animal.name,
+      ear_tag: animal.earTag,
+      breed_code: animal.breedCode,
+      birth_date: animal.birthDate,
+      lactation_no: animal.lactationNo,
+      sire_name: animal.sireName,
+      mgs_name: animal.mgsName,
+      details: animal.details,
+    };
+  });
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await supabase.from("cows").upsert(rows.slice(i, i + 200), { onConflict: "id" });
+    if (error) redirect("/vaches?import=1&message=error");
+  }
+
+  revalidatePath("/", "layout");
+  const params = new URLSearchParams({
+    herd: String(rows.length),
+    created: String(created),
+    males: herd.skippedMales.join(", "),
+  });
+  redirect(`/vaches?${params}`);
 }

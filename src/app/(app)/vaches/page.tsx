@@ -12,7 +12,27 @@ import {
   type CowRow,
   type TraitRow,
 } from "@/lib/data";
-import { addExampleCows, deleteCow, saveCow } from "./actions";
+import { addExampleCows, deleteCow, importHerd, saveCow } from "./actions";
+
+function HerdImportForm() {
+  return (
+    <form action={importHerd} className="card mb-6 space-y-3">
+      <h2 className="text-lg font-semibold">Importer mon troupeau</h2>
+      <p className="text-sm text-stone-600">
+        Choisis la liste « Tous les animaux » exportée de swissherdbook (fichier Excel). Chaque
+        vache est créée avec son ascendance et ses lactations ; une vache déjà présente (même N°
+        BDTA) est mise à jour, sans toucher aux critères que tu as saisis. Les mâles sont ignorés.
+      </p>
+      <input className="input" type="file" name="file" accept=".xlsx" required />
+      <div className="flex gap-3">
+        <button className="btn">Importer</button>
+        <Link href="/vaches" className="btn-secondary">
+          Annuler
+        </Link>
+      </div>
+    </form>
+  );
+}
 
 function CowForm({
   cow,
@@ -121,7 +141,9 @@ function CowForm({
 }
 
 export default async function CowsPage({ searchParams }: PageProps<"/vaches">) {
-  const { edit, add, message } = await searchParams;
+  const params = await searchParams;
+  const { edit, add, message } = params;
+  const one = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
   const { supabase } = await requireUser();
   const farm = await getFarm(supabase);
   const [cows, traits, breeds] = await Promise.all([
@@ -139,18 +161,34 @@ export default async function CowsPage({ searchParams }: PageProps<"/vaches">) {
           <h1 className="text-2xl font-semibold">Mon troupeau</h1>
           <p className="text-sm text-stone-600">Clique sur une vache pour ouvrir sa fiche.</p>
         </div>
-        <Link href="/vaches?add=1" className="btn">
-          Ajouter une vache
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/vaches?import=1" className="btn-secondary">
+            Importer (Excel)
+          </Link>
+          <Link href="/vaches?add=1" className="btn">
+            Ajouter une vache
+          </Link>
+        </div>
       </div>
 
       <Message code={message} />
+      {one(params.herd) !== undefined && (
+        <p className="notice-ok mb-4">
+          Troupeau importé : {one(params.herd)} animal(aux), dont {one(params.created)} nouveau(x).
+          {one(params.males) && ` Mâle(s) ignoré(s) : ${one(params.males)}.`} Ouvre une vache pour
+          voir sa fiche.
+        </p>
+      )}
+      {params.import && <HerdImportForm />}
 
       {(editing || add) && <CowForm cow={editing} traits={traits} breeds={breeds} />}
 
       {cows.length === 0 ? (
         <div className="card space-y-3 text-sm text-stone-700">
           <p>Aucune vache pour l&apos;instant.</p>
+          <Link href="/vaches?import=1" className="btn">
+            Importer mon troupeau depuis swissherdbook (Excel)
+          </Link>
           <form action={addExampleCows}>
             <button className="btn-secondary">Ajouter 4 vaches d&apos;exemple pour essayer</button>
           </form>
