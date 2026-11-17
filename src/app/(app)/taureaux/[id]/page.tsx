@@ -75,10 +75,12 @@ export default async function BullSheetPage({ params }: PageProps<"/taureaux/[id
           <DetailSections sections={bull.details.sections} />
         </>
       ) : (
-        bull.is_catalog && (
+        // Message de maintenance : seul l'administrateur du catalogue peut y remédier.
+        bull.is_catalog &&
+        isAdmin && (
           <p className="notice">
-            La fiche complète de ce taureau n&apos;est pas encore chargée : elle apparaîtra au
-            prochain import du catalogue.
+            Fiche complète du vendeur pas encore chargée pour ce taureau. Réimporte le catalogue
+            (Taureaux → Importer) pour l&apos;ajouter. Ce message n&apos;est visible que par toi.
           </p>
         )
       )}
