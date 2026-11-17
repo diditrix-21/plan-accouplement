@@ -2,6 +2,10 @@ import { signIn, signUp } from "./actions";
 
 const MESSAGES: Record<string, { text: string; kind: "notice-error" | "notice-ok" }> = {
   invalid: { text: "E-mail ou mot de passe incorrect.", kind: "notice-error" },
+  farm: {
+    text: "Pour créer un compte, indique le nom de ton exploitation.",
+    kind: "notice-error",
+  },
   short: { text: "Le mot de passe doit faire au moins 8 caractères.", kind: "notice-error" },
   signup: { text: "Impossible de créer le compte. Essaie de te connecter.", kind: "notice-error" },
   confirm: { text: "Compte créé. Confirme ton adresse via l'e-mail reçu, puis connecte-toi.", kind: "notice-ok" },
@@ -40,13 +44,35 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
             required
           />
         </div>
-        <div className="flex flex-col gap-2">
-          <button className="btn" formAction={signIn}>
-            Se connecter
-          </button>
-          <button className="btn-secondary" formAction={signUp}>
+        <button className="btn w-full" formAction={signIn}>
+          Se connecter
+        </button>
+
+        <div className="space-y-3 border-t border-stone-200 pt-4">
+          <p className="text-sm font-medium">Pas encore de compte ?</p>
+          <p className="text-sm text-stone-600">
+            Remplis l&apos;e-mail et le mot de passe ci-dessus (8 caractères au moins), puis le nom
+            de ton exploitation.
+          </p>
+          <div>
+            <label className="label" htmlFor="farm_name">
+              Nom de l&apos;exploitation
+            </label>
+            <input
+              className="input"
+              id="farm_name"
+              name="farm_name"
+              maxLength={80}
+              autoComplete="organization"
+              placeholder="ex. Du Clos"
+            />
+          </div>
+          <button className="btn-secondary w-full" formAction={signUp}>
             Créer un compte
           </button>
+          <p className="text-xs text-stone-500">
+            Ton troupeau et tes objectifs ne sont visibles que par toi.
+          </p>
         </div>
       </form>
     </main>

@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { cleanFarmName } from "@/lib/data";
 import { createClient } from "@/lib/supabase/server";
 
 function credentials(form: FormData) {
@@ -19,10 +20,18 @@ export async function signIn(form: FormData) {
 
 export async function signUp(form: FormData) {
   const { email, password } = credentials(form);
+  const farmName = cleanFarmName(form.get("farm_name"));
+  if (!farmName) redirect("/login?message=farm");
   if (password.length < 8) redirect("/login?message=short");
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  // Le nom d'exploitation est gardé avec le compte : l'exploitation est créée
+  // à la première connexion, une fois l'adresse e-mail confirmée.
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { farm_name: farmName } },
+  });
   if (error) redirect("/login?message=signup");
   // Sans session, Supabase attend la confirmation de l'adresse e-mail.
   if (!data.session) redirect("/login?message=confirm");

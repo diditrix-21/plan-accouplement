@@ -9,11 +9,16 @@ const MESSAGES: Record<string, { text: string; kind: string }> = {
     kind: "notice-error",
   },
   catalog_error: {
-    text: "L'import du catalogue a échoué. Si le catalogue a déjà été importé depuis un autre compte, c'est ce compte qui doit le mettre à jour. Sinon, réessaie : l'import peut être relancé sans risque.",
+    text: "L'import du catalogue a échoué. Réessaie : l'import peut être relancé sans risque.",
+    kind: "notice-error",
+  },
+  farmname: { text: "Le nom de l'exploitation est obligatoire.", kind: "notice-error" },
+  admin: {
+    text: "Seul l'administrateur du catalogue peut importer ou modifier le catalogue officiel.",
     kind: "notice-error",
   },
   forbidden: {
-    text: "Ce taureau a été ajouté par quelqu'un d'autre : tu ne peux pas le modifier.",
+    text: "Ce taureau fait partie du catalogue officiel : tu ne peux pas le modifier. Tu peux ajouter ta propre fiche avec « Ajouter un taureau ».",
     kind: "notice-error",
   },
 };

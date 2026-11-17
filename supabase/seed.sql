@@ -102,3 +102,6 @@ join (values
   ('EXEMPLE COMPLET', 'velage_direct', 103), ('EXEMPLE COMPLET', 'vitesse_traite', 101), ('EXEMPLE COMPLET', 'note_globale', 116),
   ('EXEMPLE COMPLET', 'membres', 112), ('EXEMPLE COMPLET', 'systeme_mammaire', 118)
 ) as v (bull_name, trait_code, value) on v.bull_name = b.name;
+
+-- Les taureaux d'exemple font partie du catalogue commun (visibles par tous).
+update public.bulls set is_catalog = true where is_example;

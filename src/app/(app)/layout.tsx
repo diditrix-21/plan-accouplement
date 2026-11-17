@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireUser } from "@/lib/data";
+import { getFarm, requireUser } from "@/lib/data";
 import { signOut } from "../login/actions";
 
 const NAV = [
@@ -11,7 +11,8 @@ const NAV = [
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user } = await requireUser();
+  const { supabase, user } = await requireUser();
+  const farm = await getFarm(supabase);
 
   return (
     <div className="min-h-screen">
@@ -28,7 +29,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             ))}
           </nav>
           <form action={signOut} className="flex items-center gap-3 text-sm text-stone-500">
-            <span className="hidden sm:inline">{user.email}</span>
+            <span className="font-medium text-stone-700">{farm.name}</span>
+            <span className="hidden md:inline">{user.email}</span>
             <button className="hover:text-stone-900 hover:underline">Déconnexion</button>
           </form>
         </div>

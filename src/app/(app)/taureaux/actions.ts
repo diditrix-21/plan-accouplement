@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { parseBullsCsv } from "@/lib/csv";
-import { loadBreeds, loadSuppliers, loadTraits, requireUser } from "@/lib/data";
+import { isCatalogAdmin, loadBreeds, loadSuppliers, loadTraits, requireUser } from "@/lib/data";
 import { number, text } from "@/lib/forms";
 import { isSwissgeneticsCsv, mergeCatalogs, parseSwissgeneticsCsv } from "@/lib/swissgenetics";
 
@@ -26,8 +26,9 @@ export async function saveBull(form: FormData) {
     price_sexed_chf: number(form, "price_sexed_chf"),
   };
 
-  // En modification, la politique RLS ne laisse passer que le créateur :
-  // aucune ligne renvoyée = taureau de quelqu'un d'autre.
+  // Un taureau ajouté ici est personnel : visible par son auteur seulement.
+  // En modification, la base ne laisse passer que l'auteur (ou l'administrateur
+  // pour le catalogue officiel) : aucune ligne renvoyée = pas le droit.
   const saved = id
     ? await supabase.from("bulls").update(bull).eq("id", id).select("id").maybeSingle()
     : await supabase.from("bulls").insert({ ...bull, created_by: user.id }).select("id").maybeSingle();
@@ -136,12 +137,15 @@ function chunks<T>(items: T[], size: number): T[][] {
 }
 
 /**
- * Import des exports CSV du catalogue Swissgenetics (un ou plusieurs fichiers).
- * Un taureau déjà présent (même vendeur, même identité) est mis à jour : on
- * peut donc réimporter après chaque nouvelle estimation des valeurs d'élevage.
+ * Import des exports CSV du catalogue Swissgenetics (un ou plusieurs fichiers)
+ * dans le catalogue officiel, visible par tous les éleveurs. Réservé à
+ * l'administrateur du catalogue. Un taureau déjà présent (même vendeur, même
+ * identité) est mis à jour : on peut réimporter après chaque nouvelle
+ * estimation des valeurs d'élevage.
  */
 export async function importCatalog(form: FormData) {
-  const { supabase } = await requireUser();
+  const { supabase, user } = await requireUser();
+  if (!(await isCatalogAdmin(supabase))) redirect("/taureaux?message=admin");
 
   const files = form
     .getAll("files")
@@ -165,38 +169,54 @@ export async function importCatalog(form: FormData) {
   const knownTraits = new Set(traits.map((t) => t.code));
   const importedAt = new Date().toISOString();
 
-  // 1. Les taureaux (création ou mise à jour), par paquets.
+  // 1. Taureaux déjà au catalogue pour ce vendeur (lus par pages de 1000).
   const idByHerdbook = new Map<string, string>();
-  for (const batch of chunks(catalog.bulls, 300)) {
+  for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("bulls")
-      .upsert(
-        batch.map((bull) => ({
-          name: bull.name,
-          full_name: bull.fullName,
-          herdbook_id: bull.herdbookId,
-          breed_code: bull.breed && knownBreeds.has(bull.breed) ? bull.breed : null,
-          supplier_id: supplier.id,
-          sire_name: bull.sire,
-          mgs_name: bull.mgs,
-          price_chf: bull.price,
-          price_sexed_chf: bull.priceSexed,
-          eval_base: bull.evalBase,
-          polled: bull.polled,
-          kappa_casein: bull.kappaCasein,
-          beta_casein: bull.betaCasein,
-          catalog_imported_at: importedAt,
-        })),
-        { onConflict: "supplier_id,herdbook_id" },
-      )
-      .select("id, herdbook_id");
-    // Échec typique : le catalogue a déjà été importé par un autre compte.
+      .select("id, herdbook_id")
+      .eq("is_catalog", true)
+      .eq("supplier_id", supplier.id)
+      .order("id")
+      .range(from, from + 999);
     if (error) redirect("/taureaux?import=1&message=catalog_error");
-    for (const row of data ?? []) idByHerdbook.set(row.herdbook_id as string, row.id as string);
+    for (const row of data ?? []) {
+      if (row.herdbook_id) idByHerdbook.set(row.herdbook_id as string, row.id as string);
+    }
+    if (!data || data.length < 1000) break;
   }
 
-  // 2. Leurs critères : on efface les anciennes valeurs puis on écrit les nouvelles.
-  const bullIds = [...idByHerdbook.values()];
+  // 2. Création ou mise à jour, par paquets. Chaque taureau garde son identifiant.
+  const rows = catalog.bulls.map((bull) => {
+    const id = idByHerdbook.get(bull.herdbookId) ?? crypto.randomUUID();
+    idByHerdbook.set(bull.herdbookId, id);
+    return {
+      id,
+      name: bull.name,
+      full_name: bull.fullName,
+      herdbook_id: bull.herdbookId,
+      breed_code: bull.breed && knownBreeds.has(bull.breed) ? bull.breed : null,
+      supplier_id: supplier.id,
+      sire_name: bull.sire,
+      mgs_name: bull.mgs,
+      price_chf: bull.price,
+      price_sexed_chf: bull.priceSexed,
+      eval_base: bull.evalBase,
+      polled: bull.polled,
+      kappa_casein: bull.kappaCasein,
+      beta_casein: bull.betaCasein,
+      catalog_imported_at: importedAt,
+      is_catalog: true,
+      created_by: user.id,
+    };
+  });
+  for (const batch of chunks(rows, 300)) {
+    const { error } = await supabase.from("bulls").upsert(batch, { onConflict: "id" });
+    if (error) redirect("/taureaux?import=1&message=catalog_error");
+  }
+
+  // 3. Leurs critères : on efface les anciennes valeurs puis on écrit les nouvelles.
+  const bullIds = rows.map((row) => row.id);
   const cleared = await Promise.all(
     chunks(bullIds, 100).map((ids) => supabase.from("bull_traits").delete().in("bull_id", ids)),
   );
@@ -216,7 +236,5 @@ export async function importCatalog(form: FormData) {
 
   const withoutValues = catalog.bulls.filter((b) => Object.keys(b.values).length === 0).length;
   revalidatePath("/", "layout");
-  redirect(
-    `/taureaux?catalog=${idByHerdbook.size}&values=${values.length}&novalues=${withoutValues}`,
-  );
+  redirect(`/taureaux?catalog=${rows.length}&values=${values.length}&novalues=${withoutValues}`);
 }

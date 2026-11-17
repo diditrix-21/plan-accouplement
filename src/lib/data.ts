@@ -35,6 +35,8 @@ export type BullRow = {
   price_chf: number | null;
   price_sexed_chf: number | null;
   is_example: boolean;
+  /** true = catalogue officiel (visible par tous) ; false = taureau personnel de l'éleveur. */
+  is_catalog: boolean;
   created_by: string | null;
   /** Nom complet, base des valeurs d'élevage (« GA HO 08.26 »), sans cornes : remplis par l'import de catalogue. */
   full_name: string | null;
@@ -78,20 +80,43 @@ export async function requireUser() {
   return { supabase, user };
 }
 
-/** Exploitation de l'utilisateur, créée au premier passage. */
+export const DEFAULT_FARM_NAME = "Mon exploitation";
+
+/** Nom d'exploitation saisi par l'utilisateur : espaces nettoyés, 80 caractères au plus. */
+export function cleanFarmName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const name = raw.replace(/\s+/g, " ").trim().slice(0, 80);
+  return name === "" ? null : name;
+}
+
+/**
+ * Exploitation de l'utilisateur, créée au premier passage avec le nom donné à
+ * l'inscription. Les règles de la base ne laissent voir que la sienne.
+ */
 export async function getFarm(supabase: Supabase): Promise<FarmRow> {
   const columns = "id, name, heifer_min_calving_ease, max_bull_share";
   const existing = await supabase.from("farms").select(columns).maybeSingle();
   if (existing.error) throw new Error(existing.error.message);
   if (existing.data) return existing.data as FarmRow;
 
-  const created = await supabase
-    .from("farms")
-    .insert({ name: "Mon exploitation" })
-    .select(columns)
-    .single();
-  if (created.error) throw new Error(created.error.message);
-  return created.data as FarmRow;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const name = cleanFarmName(user?.user_metadata?.farm_name) ?? DEFAULT_FARM_NAME;
+
+  const created = await supabase.from("farms").insert({ name }).select(columns).maybeSingle();
+  if (created.data) return created.data as FarmRow;
+
+  // Deux parties de la page ont pu créer l'exploitation en même temps : on relit.
+  const retry = await supabase.from("farms").select(columns).maybeSingle();
+  if (retry.data) return retry.data as FarmRow;
+  throw new Error(created.error?.message ?? retry.error?.message ?? "Exploitation introuvable");
+}
+
+/** Vrai si l'utilisateur a le droit de gérer le catalogue officiel. */
+export async function isCatalogAdmin(supabase: Supabase): Promise<boolean> {
+  const { data, error } = await supabase.from("catalog_admins").select("user_id").maybeSingle();
+  return !error && data !== null;
 }
 
 export async function loadTraits(supabase: Supabase): Promise<TraitRow[]> {
@@ -118,10 +143,13 @@ export type BullFilter = {
   supplierId?: string;
   /** Recherche dans le nom court ou complet. */
   search?: string;
+  /** « catalog » = catalogue officiel seulement, « mine » = mes taureaux personnels. */
+  scope?: "catalog" | "mine";
 };
 
 /**
- * Charge les taureaux avec leurs critères. L'API Supabase renvoie au plus
+ * Charge les taureaux visibles par l'utilisateur (catalogue officiel + ses
+ * taureaux personnels) avec leurs critères. L'API Supabase renvoie au plus
  * 1000 lignes par requête : on lit donc par pages pour ne perdre personne.
  */
 export async function loadBulls(supabase: Supabase, filter: BullFilter = {}): Promise<BullRow[]> {
@@ -140,6 +168,7 @@ export async function loadBulls(supabase: Supabase, filter: BullFilter = {}): Pr
       .range(from, from + pageSize - 1);
     if (filter.breedCodes) query = query.in("breed_code", filter.breedCodes);
     if (filter.supplierId) query = query.eq("supplier_id", filter.supplierId);
+    if (filter.scope) query = query.eq("is_catalog", filter.scope === "catalog");
     if (filter.search) {
       // Les caractères spéciaux de la syntaxe de filtre sont retirés de la recherche.
       const term = filter.search.replace(/[%_,()*\\]/g, " ").trim();

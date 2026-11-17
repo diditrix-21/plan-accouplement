@@ -1,5 +1,14 @@
 import Link from "next/link";
-import { countBulls, getFarm, loadCows, loadGoals, requireUser } from "@/lib/data";
+import { Message } from "@/components/Message";
+import {
+  DEFAULT_FARM_NAME,
+  countBulls,
+  getFarm,
+  loadCows,
+  loadGoals,
+  requireUser,
+} from "@/lib/data";
+import { renameFarm } from "./actions";
 
 function Step({
   number,
@@ -38,7 +47,8 @@ function Step({
   );
 }
 
-export default async function HomePage() {
+export default async function HomePage({ searchParams }: PageProps<"/">) {
+  const params = await searchParams;
   const { supabase } = await requireUser();
   const farm = await getFarm(supabase);
   const [cows, bullCount, goals] = await Promise.all([
@@ -48,10 +58,45 @@ export default async function HomePage() {
   ]);
   const goalCount = Object.values(goals).filter((weight) => weight > 0).length;
   const ready = cows.length > 0 && bullCount > 0 && goalCount > 0;
+  const unnamed = farm.name === DEFAULT_FARM_NAME;
+  const renaming = unnamed || params.rename !== undefined;
 
   return (
     <>
-      <h1 className="mb-1 text-2xl font-semibold">{farm.name}</h1>
+      <div className="mb-1 flex flex-wrap items-baseline gap-x-3">
+        <h1 className="text-2xl font-semibold">{farm.name}</h1>
+        {!renaming && (
+          <Link href="/?rename=1" className="text-sm text-stone-500 hover:text-brand hover:underline">
+            Renommer
+          </Link>
+        )}
+      </div>
+
+      <Message code={params.message} />
+      {renaming && (
+        <form action={renameFarm} className="card my-4 flex flex-wrap items-end gap-3">
+          <div className="min-w-56 flex-1">
+            <label className="label" htmlFor="farm_name">
+              {unnamed ? "Comment s'appelle ton exploitation ?" : "Nom de l'exploitation"}
+            </label>
+            <input
+              className="input"
+              id="farm_name"
+              name="farm_name"
+              maxLength={80}
+              required
+              defaultValue={unnamed ? "" : farm.name}
+              placeholder="ex. Du Clos"
+            />
+          </div>
+          <button className="btn">Enregistrer</button>
+          {!unnamed && (
+            <Link href="/" className="btn-secondary">
+              Annuler
+            </Link>
+          )}
+        </form>
+      )}
       <p className="mb-5 text-sm text-stone-600">
         Trois choses à renseigner, puis le plan se calcule tout seul.
       </p>
@@ -68,7 +113,7 @@ export default async function HomePage() {
         <Step
           number={2}
           title="Le catalogue de taureaux"
-          status={bullCount === 0 ? "Catalogue vide" : `${bullCount} taureau(x), tous vendeurs confondus`}
+          status={bullCount === 0 ? "Catalogue vide" : `${bullCount} taureau(x) à disposition`}
           done={bullCount > 0}
           href="/taureaux"
           action={bullCount === 0 ? "Ajouter des taureaux" : "Voir le catalogue"}

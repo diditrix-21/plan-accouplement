@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Message } from "@/components/Message";
 import { TraitInputs } from "@/components/TraitInputs";
 import {
+  isCatalogAdmin,
   loadBreeds,
   loadBulls,
   loadSuppliers,
@@ -115,6 +116,7 @@ function BullForm({
       <div>
         <p className="mb-3 text-sm text-stone-600">
           Recopie les valeurs de la fiche du vendeur. Un critère laissé vide compte comme « moyen ».
+          {!bull?.is_catalog && " Ce taureau est personnel : toi seul le vois, et il entre dans ton plan."}
         </p>
         <TraitInputs traits={traits} values={valuesByCode(bull?.bull_traits ?? [])} />
       </div>
@@ -164,8 +166,9 @@ function CatalogImportForm() {
 function ImportForm({ traits }: { traits: TraitRow[] }) {
   return (
     <form action={importBulls} className="card mb-6 space-y-3">
-      <h2 className="text-lg font-semibold">Importer depuis un tableur</h2>
+      <h2 className="text-lg font-semibold">Importer mes taureaux depuis un tableur</h2>
       <p className="text-sm text-stone-600">
+        Ces taureaux sont personnels : toi seul les vois.{" "}
         Copie-colle depuis Excel, première ligne = en-têtes. Colonnes reconnues :{" "}
         <code className="text-xs">nom, race, vendeur, pere, gpm, prix, prix_sexe, no_herdbook</code>, puis
         un code de critère par colonne.
@@ -206,18 +209,24 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
   const race = first(params.race);
   const vendeur = first(params.vendeur);
   const search = first(params.q);
-  const [bulls, traits, breeds, suppliers] = await Promise.all([
+  const origine = first(params.origine);
+  const scope = origine === "perso" ? "mine" : origine === "catalogue" ? "catalog" : undefined;
+  const [bulls, traits, breeds, suppliers, isAdmin] = await Promise.all([
     loadBulls(supabase, {
       breedCodes: race ? [race] : undefined,
       supplierId: vendeur,
       search,
+      scope,
     }),
     loadTraits(supabase),
     loadBreeds(supabase),
     loadSuppliers(supabase),
+    isCatalogAdmin(supabase),
   ]);
 
-  const editing = bulls.find((b) => b.id === first(params.edit) && b.created_by === user.id);
+  // Catalogue officiel : seul l'administrateur le modifie. Taureau personnel : son auteur.
+  const canEdit = (bull: BullRow) => (bull.is_catalog ? isAdmin : bull.created_by === user.id);
+  const editing = bulls.find((b) => b.id === first(params.edit) && canEdit(b));
   const visible = bulls.slice(0, MAX_ROWS);
   const catalog = first(params.catalog);
   const imported = first(params.imported);
@@ -225,7 +234,13 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Catalogue de taureaux</h1>
+        <div>
+          <h1 className="text-2xl font-semibold">Taureaux</h1>
+          <p className="text-sm text-stone-600">
+            Le catalogue officiel est le même pour tous. Les taureaux que tu ajoutes toi-même sont
+            marqués « Perso » et ne sont visibles que par toi.
+          </p>
+        </div>
         <div className="flex gap-2">
           <Link href="/taureaux?import=1" className="btn-secondary">
             Importer
@@ -262,7 +277,7 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
 
       {params.import && (
         <>
-          <CatalogImportForm />
+          {isAdmin && <CatalogImportForm />}
           <ImportForm traits={traits} />
         </>
       )}
@@ -295,6 +310,16 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
                 {supplier.name}
               </option>
             ))}
+          </select>
+        </div>
+        <div>
+          <label className="label" htmlFor="origine">
+            Origine
+          </label>
+          <select className="input" id="origine" name="origine" defaultValue={origine ?? ""}>
+            <option value="">Tous</option>
+            <option value="catalogue">Catalogue officiel</option>
+            <option value="perso">Mes taureaux</option>
           </select>
         </div>
         <div>
@@ -335,6 +360,11 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
                   <td className="px-4 py-3">
                     <span className="font-medium">{bull.name}</span>
                     {bull.polled && <span className="ml-1 text-xs text-stone-500">{bull.polled}</span>}
+                    {!bull.is_catalog && (
+                      <span className="ml-2 rounded bg-stone-100 px-1.5 py-0.5 text-xs text-stone-600">
+                        Perso
+                      </span>
+                    )}
                     {bull.full_name && bull.full_name !== bull.name && (
                       <span className="block text-xs text-stone-500">{bull.full_name}</span>
                     )}
@@ -352,7 +382,7 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    {bull.created_by === user.id && (
+                    {canEdit(bull) && (
                       <div className="flex justify-end gap-4">
                         <Link
                           href={`/taureaux?edit=${bull.id}`}
