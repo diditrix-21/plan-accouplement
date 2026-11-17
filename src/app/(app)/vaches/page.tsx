@@ -135,7 +135,10 @@ export default async function CowsPage({ searchParams }: PageProps<"/vaches">) {
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Troupeau</h1>
+        <div>
+          <h1 className="text-2xl font-semibold">Mon troupeau</h1>
+          <p className="text-sm text-stone-600">Clique sur une vache pour ouvrir sa fiche.</p>
+        </div>
         <Link href="/vaches?add=1" className="btn">
           Ajouter une vache
         </Link>
@@ -172,8 +175,10 @@ export default async function CowsPage({ searchParams }: PageProps<"/vaches">) {
                   .map((t) => labels.get(t.trait_code) ?? t.trait_code);
                 return (
                   <tr key={cow.id}>
-                    <td className="px-4 py-3 font-medium">
-                      {cow.name}
+                    <td className="px-4 py-3">
+                      <Link href={`/vaches/${cow.id}`} className="font-medium text-brand hover:underline">
+                        {cow.name}
+                      </Link>
                       {cow.ear_tag && <span className="ml-2 text-stone-400">{cow.ear_tag}</span>}
                     </td>
                     <td className="px-4 py-3">{cow.breed?.name ?? "—"}</td>

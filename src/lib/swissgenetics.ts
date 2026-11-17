@@ -18,6 +18,21 @@ import { parseNumber } from "./forms";
 
 export type ScaleProfile = "suisse" | "de_at" | "france" | "canada" | "nordique" | "inconnue";
 
+/** Ascendance telle que publiée par le vendeur (noms et identités). */
+export type Pedigree = Partial<
+  Record<
+    | "sire" | "sireId" | "ss" | "ssId" | "sd" | "sdId"
+    | "dam" | "damId" | "ds" | "dsId" | "dd" | "ddId" | "dds" | "ddd",
+    string
+  >
+>;
+
+/** Une rubrique du certificat : libellé du vendeur → valeur, dans l'ordre du fichier. */
+export type DetailSection = { title: string; items: [string, string][] };
+
+/** Tout le contenu de la fiche du vendeur, pour afficher le certificat complet. */
+export type CatalogDetails = { pedigree: Pedigree; sections: DetailSection[] };
+
 export type CatalogBull = {
   name: string;
   fullName: string | null;
@@ -33,7 +48,135 @@ export type CatalogBull = {
   kappaCasein: string | null;
   betaCasein: string | null;
   values: Record<string, number>;
+  details: CatalogDetails;
 };
+
+const PEDIGREE_COLUMNS: Record<string, keyof Pedigree> = {
+  "Nom du père": "sire",
+  "Identité père": "sireId",
+  "Nom PP": "ss",
+  "Identité PP": "ssId",
+  "Nom MP": "sd",
+  "Identité MP": "sdId",
+  "Nom de la mère": "dam",
+  "Identité mère": "damId",
+  "Nom PM": "ds",
+  "Identité PM": "dsId",
+  "Nom MM": "dd",
+  "Identité MM": "ddId",
+  "Nom PMM": "dds",
+  "Nom MMM": "ddd",
+};
+
+/** Colonnes déjà affichées en tête de fiche : pas répétées dans les rubriques. */
+const HEADER_COLUMNS = new Set(["Nom court", "Nom complet", "Identité", "Race"]);
+
+/** Colonnes « case cochée » (1 = oui). */
+const FLAG_COLUMNS = new Set([
+  "Libre d'ET", "Sans cornes PP", "Sans cornes Pp", "Testé par la descendance", "Optimis",
+  "Reinzucht/Mutterkuhhalter", "Taureau CH", "Vache Mère Suisse (logo)", "Feuille de trèfle",
+  "Fleisch", "Immunity+", "Fromage", "Croisements sur races laitières", "Testé Beef (logo)",
+  "Robot de traite", "Pâture", "BIO-Stier", "Milch",
+]);
+
+const SECTION_OF: Record<string, string> = {};
+const assign = (title: string, columns: string[]) => columns.forEach((c) => (SECTION_OF[c] = title));
+assign("Identité et labels", [
+  "Pourcentage de sang", "aAa", "Éleveur", "VE", "κ-cas.", "β-cas.", "Nombre de filles",
+  "Filles/exploitations", "Direkte Söhne", "Remarque", ...FLAG_COLUMNS,
+]);
+assign("Prix des doses (CHF)", [
+  "N [CHF]", "N [R]", "X [CHF]", "X [R]", "S [CHF]", "S [R]", "Y [CHF]", "Y [R]",
+]);
+assign("Index globaux", [
+  "ISET", "IPL", "ITP", "IFF", "IAP", "VEG", "VL", "VF", "VEP", "IFV", "IBB", "IGN", "ISC",
+  "NTM", "ISU", "SL", "FW", "SAN",
+]);
+assign("Production laitière", [
+  "Sécurité %", "Lait kg", "Graisse kg", "Graisse %", "Protéine kg", "Protéine %", "PMKV",
+  "CKV", "GRAKV", "PMMT", "CMT", "GRAMT", "Sicherheit % (Index)", "Milch kg (Index)",
+  "Fett kg (Index)", "Fett % (Index)", "Eiweiss kg (Index)", "Eiweiss % (Index)", "Persistance",
+  "Augment. production", "From'MIR",
+]);
+assign("Santé, fertilité et vêlage", [
+  "Cellules somatiques", "Cellules", "Résistance aux mammites", "Mammites cliniques",
+  "Santé du pis", "Santé des onglons", "Santé du pied", "Durée d'utilisation", "Longévité",
+  "Filles éliminées", "Fertilité", "Fertilité vaches", "Fertilité génisses", "Reproduction",
+  "Vêlage-IA1", "NRR taureau", "Vêlage direct", "Vêlage filles", "Vêlages normaux taureau",
+  "Vêlages normaux filles", "Facilité de naissance des veaux", "Facilité de vêlage des filles",
+  "Vitalité des veaux", "Vitalité des veaux directe", "Vitalité des veaux filles",
+  "Aptitude à la traite", "Vitesse de traite", "Tempérament", "DigeR", "Durée de gestation",
+]);
+assign("Viande et vêlage (races à viande)", [
+  "Vêlage sur vaches laitières", "Poids à la naissance sur vaches laitières",
+  "Vêlage sur vaches mères", "Poids à la naissance sur vaches mères", "Veaux poids mort",
+  "Veaux charnure", "Veaux couverture graisseuse", "Natura-Beef poids mort",
+  "Natura-Beef charnure", "Natura-Beef couverture graisseuse", "Gros bétail poids mort",
+  "Gros bétail charnure", "Gros bétail couverture graisseuse",
+]);
+/** Libellés du vendeur peu parlants, réécrits pour la fiche. */
+const DISPLAY_LABELS: Record<string, string> = {
+  VE: "Base des valeurs d'élevage",
+  "N [CHF]": "Dose conventionnelle",
+  "N [R]": "Dose conventionnelle (code)",
+  "X [CHF]": "Dose sexée",
+  "X [R]": "Dose sexée (code)",
+  "κ-cas.": "Kappa-caséine",
+  "β-cas.": "Bêta-caséine",
+  "Direkte Söhne": "Fils au catalogue",
+  "Reinzucht/Mutterkuhhalter": "Race pure / vache mère",
+  "Qualité d'osssature": "Qualité d'ossature",
+};
+
+const MORPHOLOGY = "Morphologie (description linéaire)";
+export const SECTION_ORDER = [
+  "Identité et labels",
+  "Prix des doses (CHF)",
+  "Index globaux",
+  "Production laitière",
+  "Santé, fertilité et vêlage",
+  "Viande et vêlage (races à viande)",
+  MORPHOLOGY,
+];
+
+/** Pedigree + rubriques pour une ligne du fichier. */
+function buildDetails(headers: string[], row: string[]): CatalogDetails {
+  const pedigree: Pedigree = {};
+  const sections = new Map<string, [string, string][]>();
+  const seen = new Set<string>();
+
+  headers.forEach((rawHeader, index) => {
+    const header = rawHeader.trim();
+    const value = clean(row[index]);
+    if (!header || value === null || HEADER_COLUMNS.has(header)) return;
+
+    const pedigreeKey = PEDIGREE_COLUMNS[header];
+    if (pedigreeKey) {
+      pedigree[pedigreeKey] = value;
+      return;
+    }
+
+    // La 2e colonne « Nombre de filles » compte les filles décrites en morphologie.
+    const repeated = seen.has(header);
+    seen.add(header);
+    const title = repeated ? MORPHOLOGY : (SECTION_OF[header] ?? MORPHOLOGY);
+    const label = repeated
+      ? `${header} (morphologie)`
+      : (DISPLAY_LABELS[header] ?? header.replace(/\s+$/, ""));
+    const shown = FLAG_COLUMNS.has(header) ? (value === "1" ? "Oui" : value) : value.replace(/\|/g, " / ");
+
+    if (!sections.has(title)) sections.set(title, []);
+    sections.get(title)!.push([label, shown]);
+  });
+
+  return {
+    pedigree,
+    sections: SECTION_ORDER.filter((t) => sections.has(t)).map((title) => ({
+      title,
+      items: sections.get(title)!,
+    })),
+  };
+}
 
 export type CatalogResult = {
   bulls: CatalogBull[];
@@ -285,6 +428,7 @@ export function parseSwissgeneticsCsv(text: string): CatalogResult {
       kappaCasein: clean(cell(row, "κ-cas.")),
       betaCasein: clean(cell(row, "β-cas.")),
       values,
+      details: buildDetails(headers, row),
     });
   });
 

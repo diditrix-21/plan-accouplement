@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import type { CatalogDetails } from "@/lib/swissgenetics";
 
 export type TraitRow = {
   code: string;
@@ -42,6 +43,8 @@ export type BullRow = {
   full_name: string | null;
   eval_base: string | null;
   polled: "PP" | "Pp" | null;
+  kappa_casein: string | null;
+  beta_casein: string | null;
   supplier: { name: string } | null;
   breed: { name: string; breed_group: string } | null;
   bull_traits: { trait_code: string; value: number }[];
@@ -58,6 +61,8 @@ export type CowRow = {
   sire_name: string | null;
   mgs_name: string | null;
   notes: string | null;
+  /** Certificat importé (ascendance complète, chiffres) ; absent si saisie à la main. */
+  details: CatalogDetails | null;
   breed: { name: string; breed_group: string } | null;
   cow_traits: { trait_code: string; value: number; estimated: boolean }[];
 };
@@ -152,6 +157,12 @@ export type BullFilter = {
  * taureaux personnels) avec leurs critères. L'API Supabase renvoie au plus
  * 1000 lignes par requête : on lit donc par pages pour ne perdre personne.
  */
+/** Colonnes de la liste : sans la fiche complète, trop lourde pour 1000 taureaux. */
+const BULL_LIST_COLUMNS =
+  "id, name, full_name, herdbook_id, breed_code, supplier_id, sire_name, mgs_name, price_chf, " +
+  "price_sexed_chf, is_example, is_catalog, created_by, eval_base, polled, kappa_casein, beta_casein, " +
+  "supplier:suppliers(name), breed:breeds(name, breed_group), bull_traits(trait_code, value)";
+
 export async function loadBulls(supabase: Supabase, filter: BullFilter = {}): Promise<BullRow[]> {
   if (filter.breedCodes && filter.breedCodes.length === 0) return [];
 
@@ -160,9 +171,7 @@ export async function loadBulls(supabase: Supabase, filter: BullFilter = {}): Pr
   for (let from = 0; ; from += pageSize) {
     let query = supabase
       .from("bulls")
-      .select(
-        "*, supplier:suppliers(name), breed:breeds(name, breed_group), bull_traits(trait_code, value)",
-      )
+      .select(BULL_LIST_COLUMNS)
       .order("name")
       .order("id")
       .range(from, from + pageSize - 1);
@@ -182,6 +191,20 @@ export async function loadBulls(supabase: Supabase, filter: BullFilter = {}): Pr
   return bulls;
 }
 
+export type BullSheet = BullRow & { details: CatalogDetails | null };
+
+/** Un taureau avec sa fiche complète, s'il est visible par l'utilisateur. */
+export async function loadBull(supabase: Supabase, id: string): Promise<BullSheet | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const { data, error } = await supabase
+    .from("bulls")
+    .select(`${BULL_LIST_COLUMNS}, details`)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as unknown as BullSheet | null;
+}
+
 /** Nombre de taureaux du catalogue, sans les charger. */
 export async function countBulls(supabase: Supabase): Promise<number> {
   const { count, error } = await supabase.from("bulls").select("id", { count: "exact", head: true });
@@ -197,6 +220,18 @@ export async function loadCows(supabase: Supabase, farmId: string): Promise<CowR
     .order("name");
   if (error) throw new Error(error.message);
   return (data ?? []) as unknown as CowRow[];
+}
+
+/** Une vache de l'utilisateur (les règles de la base cachent celles des autres). */
+export async function loadCow(supabase: Supabase, id: string): Promise<CowRow | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const { data, error } = await supabase
+    .from("cows")
+    .select("*, breed:breeds(name, breed_group), cow_traits(trait_code, value, estimated)")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as unknown as CowRow | null;
 }
 
 export async function loadGoals(

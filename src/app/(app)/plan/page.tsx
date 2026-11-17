@@ -18,7 +18,9 @@ function Recommendation({ rank, pair, chosen }: { rank: number; pair: PairScore;
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <p className="font-medium">
           <span className="mr-2 text-stone-500">{rank}.</span>
-          {bull.name}
+          <Link href={`/taureaux/${bull.id}`} className="text-brand hover:underline">
+            {bull.name}
+          </Link>
           {chosen && (
             <span className="ml-2 rounded bg-brand px-2 py-0.5 text-xs font-medium text-white">
               Retenu
@@ -61,10 +63,12 @@ function Recommendation({ rank, pair, chosen }: { rank: number; pair: PairScore;
 
 function CowCard({ plan }: { plan: CowPlan }) {
   return (
-    <section className="card">
+    <section className="card scroll-mt-24" id={`vache-${plan.cow.id}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold">
-          {plan.cow.name}
+          <Link href={`/vaches/${plan.cow.id}`} className="hover:text-brand hover:underline">
+            {plan.cow.name}
+          </Link>
           {plan.cow.isHeifer && (
             <span className="ml-2 rounded bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
               Génisse
@@ -143,7 +147,9 @@ function Order({ doses, cap }: { doses: DoseNeed[]; cap: number }) {
           {doses.map((need) => (
             <tr key={need.bull.id}>
               <td className="py-2">
-                <span className="font-medium">{need.bull.name}</span>
+                <Link href={`/taureaux/${need.bull.id}`} className="font-medium text-brand hover:underline">
+                  {need.bull.name}
+                </Link>
                 <span className="block text-xs text-stone-500">{need.cows.join(", ")}</span>
               </td>
               <td className="py-2">{need.bull.supplier ?? "—"}</td>
@@ -185,7 +191,12 @@ export default async function PlanPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Plan d&apos;accouplement</h1>
+      <div>
+        <h1 className="text-2xl font-semibold">Plan d&apos;accouplement</h1>
+        <p className="text-sm text-stone-600">
+          Clique sur une vache ou un taureau pour ouvrir sa fiche.
+        </p>
+      </div>
 
       {plan.cowCount === 0 && (
         <Missing text="Il n'y a pas encore de vache dans le troupeau." href="/vaches" action="Ajouter des vaches" />

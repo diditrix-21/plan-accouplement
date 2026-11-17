@@ -205,12 +205,14 @@ export async function importCatalog(form: FormData) {
       polled: bull.polled,
       kappa_casein: bull.kappaCasein,
       beta_casein: bull.betaCasein,
+      details: bull.details,
       catalog_imported_at: importedAt,
       is_catalog: true,
       created_by: user.id,
     };
   });
-  for (const batch of chunks(rows, 300)) {
+  // Paquets de 100 : chaque fiche complète pèse quelques kilo-octets.
+  for (const batch of chunks(rows, 100)) {
     const { error } = await supabase.from("bulls").upsert(batch, { onConflict: "id" });
     if (error) redirect("/taureaux?import=1&message=catalog_error");
   }

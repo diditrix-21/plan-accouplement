@@ -237,8 +237,9 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
         <div>
           <h1 className="text-2xl font-semibold">Taureaux</h1>
           <p className="text-sm text-stone-600">
-            Le catalogue officiel est le même pour tous. Les taureaux que tu ajoutes toi-même sont
-            marqués « Perso » et ne sont visibles que par toi.
+            Clique sur un taureau pour ouvrir sa fiche. Le catalogue officiel est le même pour
+            tous ; les taureaux que tu ajoutes toi-même sont marqués « Perso » et ne sont visibles
+            que par toi.
           </p>
         </div>
         <div className="flex gap-2">
@@ -358,7 +359,9 @@ export default async function BullsPage({ searchParams }: PageProps<"/taureaux">
               {visible.map((bull) => (
                 <tr key={bull.id}>
                   <td className="px-4 py-3">
-                    <span className="font-medium">{bull.name}</span>
+                    <Link href={`/taureaux/${bull.id}`} className="font-medium text-brand hover:underline">
+                      {bull.name}
+                    </Link>
                     {bull.polled && <span className="ml-1 text-xs text-stone-500">{bull.polled}</span>}
                     {!bull.is_catalog && (
                       <span className="ml-2 rounded bg-stone-100 px-1.5 py-0.5 text-xs text-stone-600">
