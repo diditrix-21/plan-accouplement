@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getFarm, loadBreeds, loadTraits, requireUser, type TraitRow } from "@/lib/data";
+import { isBreedingValueList, mergeSections, parseBreedingValues } from "@/lib/breeding-values";
 import { isHerdList, parseHerdList } from "@/lib/herd";
+import type { CatalogDetails } from "@/lib/swissgenetics";
 import { number, text } from "@/lib/forms";
 
 type TraitValue = { trait_code: string; value: number; estimated: boolean };
@@ -148,6 +150,9 @@ export async function importHerd(form: FormData) {
     // ExcelJS numérote les colonnes à partir de 1.
     lines.push((row.values as unknown[]).slice(1));
   });
+  if (lines.length >= 2 && isBreedingValueList(lines[0])) {
+    await importBreedingValues(supabase, farm.id, lines);
+  }
   if (lines.length < 2 || !isHerdList(lines[0])) redirect("/vaches?import=1&message=herd_format");
 
   const breeds = await loadBreeds(supabase);
@@ -158,13 +163,17 @@ export async function importHerd(form: FormData) {
     .select("id, ear_tag")
     .eq("farm_id", farm.id);
   if (readError) redirect("/vaches?import=1&message=error");
+  // Comparaison sur les chiffres seuls : « CH 120.1613.7546.4 » = « 120.1613.7546.4 ».
+  const digits = (tag: string) => tag.replace(/\D/g, "");
   const idByTag = new Map(
-    (existing ?? []).filter((c) => c.ear_tag).map((c) => [c.ear_tag as string, c.id as string]),
+    (existing ?? [])
+      .filter((c) => c.ear_tag)
+      .map((c) => [digits(c.ear_tag as string), c.id as string]),
   );
 
   let created = 0;
   const rows = herd.animals.map((animal) => {
-    let id = idByTag.get(animal.earTag);
+    let id = idByTag.get(digits(animal.earTag));
     if (!id) {
       id = crypto.randomUUID();
       created += 1;
@@ -193,5 +202,58 @@ export async function importHerd(form: FormData) {
     created: String(created),
     males: herd.skippedMales.join(", "),
   });
+  redirect(`/vaches?${params}`);
+}
+
+type Supabase = Awaited<ReturnType<typeof requireUser>>["supabase"];
+
+/**
+ * Valeurs d'élevage swissherdbook : rattachées aux vaches déjà dans le
+ * troupeau (même N° BDTA). Les vraies valeurs remplacent les cases « faible »
+ * des mêmes critères ; les autres critères ne bougent pas.
+ */
+async function importBreedingValues(supabase: Supabase, farmId: string, lines: unknown[][]) {
+  const animals = parseBreedingValues(lines[0], lines.slice(1));
+  const traits = await loadTraits(supabase);
+  const knownTraits = new Set(traits.map((t) => t.code));
+
+  const { data: cows, error } = await supabase
+    .from("cows")
+    .select("id, ear_tag, details")
+    .eq("farm_id", farmId);
+  if (error) redirect("/vaches?import=1&message=error");
+  const digits = (tag: string | null) => (tag ?? "").replace(/\D/g, "");
+  const cowByTag = new Map((cows ?? []).filter((c) => c.ear_tag).map((c) => [digits(c.ear_tag), c]));
+
+  const unknown: string[] = [];
+  let matched = 0;
+  for (const animal of animals) {
+    const cow = cowByTag.get(digits(animal.earTag));
+    if (!cow) {
+      unknown.push(animal.name ?? animal.earTag);
+      continue;
+    }
+    matched += 1;
+
+    const values = Object.entries(animal.traits)
+      .filter(([code]) => knownTraits.has(code))
+      .map(([trait_code, value]) => ({ cow_id: cow.id, trait_code, value, estimated: false }));
+    if (values.length > 0) {
+      const { error: writeError } = await supabase
+        .from("cow_traits")
+        .upsert(values, { onConflict: "cow_id,trait_code" });
+      if (writeError) redirect("/vaches?import=1&message=error");
+    }
+
+    const details = (cow.details as CatalogDetails | null) ?? { pedigree: {}, sections: [] };
+    const { error: detailsError } = await supabase
+      .from("cows")
+      .update({ details: { ...details, sections: mergeSections(details.sections, animal.sections) } })
+      .eq("id", cow.id);
+    if (detailsError) redirect("/vaches?import=1&message=error");
+  }
+
+  revalidatePath("/", "layout");
+  const params = new URLSearchParams({ values: String(matched), unknown: unknown.join(", ") });
   redirect(`/vaches?${params}`);
 }

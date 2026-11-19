@@ -19,9 +19,21 @@ function HerdImportForm() {
     <form action={importHerd} className="card mb-6 space-y-3">
       <h2 className="text-lg font-semibold">Importer mon troupeau</h2>
       <p className="text-sm text-stone-600">
-        Choisis la liste « Tous les animaux » exportée de swissherdbook (fichier Excel). Chaque
-        vache est créée avec son ascendance et ses lactations ; une vache déjà présente (même N°
-        BDTA) est mise à jour, sans toucher aux critères que tu as saisis. Les mâles sont ignorés.
+        Deux fichiers Excel de swissherdbook, à importer l&apos;un après l&apos;autre :
+      </p>
+      <ol className="list-decimal space-y-1 pl-5 text-sm text-stone-600">
+        <li>
+          la liste <strong>« Tous les animaux »</strong> : crée les vaches avec leur ascendance et
+          leurs lactations (les mâles sont ignorés) ;
+        </li>
+        <li>
+          la <strong>« Liste des valeurs d&apos;élevage »</strong> : ajoute les chiffres
+          (production, santé, morphologie) que le plan utilise pour corriger les défauts.
+        </li>
+      </ol>
+      <p className="text-sm text-stone-600">
+        Une vache déjà présente (même N° BDTA) est mise à jour. Refais l&apos;import après chaque
+        nouvelle estimation.
       </p>
       <input className="input" type="file" name="file" accept=".xlsx" required />
       <div className="flex gap-3">
@@ -177,6 +189,14 @@ export default async function CowsPage({ searchParams }: PageProps<"/vaches">) {
           Troupeau importé : {one(params.herd)} animal(aux), dont {one(params.created)} nouveau(x).
           {one(params.males) && ` Mâle(s) ignoré(s) : ${one(params.males)}.`} Ouvre une vache pour
           voir sa fiche.
+        </p>
+      )}
+      {one(params.values) !== undefined && (
+        <p className="notice-ok mb-4">
+          Valeurs d&apos;élevage importées pour {one(params.values)} vache(s). Le plan en tient
+          compte dès maintenant.
+          {one(params.unknown) &&
+            ` Pas dans le troupeau (importe d'abord la liste des animaux) : ${one(params.unknown)}.`}
         </p>
       )}
       {params.import && <HerdImportForm />}
