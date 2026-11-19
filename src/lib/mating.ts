@@ -114,6 +114,12 @@ export type CowPlan = {
   chosen: PairScore | null;
   /** Rang du taureau retenu dans le classement de la vache (1 = premier choix). */
   chosenRank: number | null;
+  /** Meilleure dose disponible dans le container pour cette vache (stock réparti). */
+  fromStock: PairScore | null;
+  /** Rang de cette dose dans le classement de la vache. */
+  fromStockRank: number | null;
+  /** Des doses compatibles existent en stock, mais elles vont à d'autres vaches. */
+  stockTakenByOthers: boolean;
   exclusions: Exclusion[];
 };
 
@@ -303,7 +309,10 @@ export function scorePair(
   };
 }
 
-type RankedCow = Omit<CowPlan, "recommendations" | "chosen" | "chosenRank"> & {
+type RankedCow = Omit<
+  CowPlan,
+  "recommendations" | "chosen" | "chosenRank" | "fromStock" | "fromStockRank" | "stockTakenByOthers"
+> & {
   ranked: PairScore[];
 };
 
@@ -354,7 +363,13 @@ function rankForCow(
   return { ...base, note: null, candidates: sameBreed.length, ranked, exclusions };
 }
 
-function toPlan(entry: RankedCow, chosenIndex: number | null, top: number): CowPlan {
+function toPlan(
+  entry: RankedCow,
+  chosenIndex: number | null,
+  top: number,
+  stockIndex: number | null = null,
+  stockTakenByOthers = false,
+): CowPlan {
   const { ranked, ...rest } = entry;
   const recommendations = ranked.slice(0, top);
   const chosen = chosenIndex === null ? null : ranked[chosenIndex];
@@ -365,7 +380,37 @@ function toPlan(entry: RankedCow, chosenIndex: number | null, top: number): CowP
     recommendations,
     chosen,
     chosenRank: chosenIndex === null ? null : chosenIndex + 1,
+    fromStock: stockIndex === null ? null : ranked[stockIndex],
+    fromStockRank: stockIndex === null ? null : stockIndex + 1,
+    stockTakenByOthers,
   };
+}
+
+/**
+ * Répartit les doses du container. Chaque dose va à la vache pour qui elle
+ * vaut le plus (meilleurs couples d'abord), une dose par vache au plus.
+ * Renvoie, pour chaque vache, l'indice de la dose retenue dans son classement.
+ */
+export function assignStock(ranked: PairScore[][], stock: Record<string, number>): {
+  choice: (number | null)[];
+  takenByOthers: boolean[];
+} {
+  const left = { ...stock };
+  const pairs = ranked.flatMap((list, cow) =>
+    list
+      .map((pair, index) => ({ cow, index, score: pair.score, bull: pair.bull.id }))
+      .filter((p) => (stock[p.bull] ?? 0) > 0),
+  );
+  pairs.sort((a, b) => b.score - a.score || a.cow - b.cow);
+
+  const choice: (number | null)[] = ranked.map(() => null);
+  for (const pair of pairs) {
+    if (choice[pair.cow] !== null || (left[pair.bull] ?? 0) <= 0) continue;
+    choice[pair.cow] = pair.index;
+    left[pair.bull] -= 1;
+  }
+  const compatible = ranked.map((list) => list.some((pair) => (stock[pair.bull.id] ?? 0) > 0));
+  return { choice, takenByOthers: compatible.map((has, cow) => has && choice[cow] === null) };
 }
 
 /** Classement des taureaux pour une vache seule (sans limite par taureau). */
@@ -430,20 +475,25 @@ export function bullCap(cowCount: number, maxBullShare: number): number {
   return Math.max(1, Math.ceil(cowCount * maxBullShare));
 }
 
+/**
+ * @param stock doses en stock par identifiant de taureau (container de l'éleveur).
+ */
 export function planForHerd(
   cows: Cow[],
   bulls: Bull[],
   traits: Trait[],
   goals: Goals,
   options: Options = DEFAULT_OPTIONS,
+  stock: Record<string, number> = {},
 ): CowPlan[] {
   const entries = cows.map((cow) => rankForCow(cow, bulls, traits, goals, options));
   const withOptions = entries.filter((e) => e.ranked.length > 0).length;
-  const choice = assignBulls(
-    entries.map((e) => e.ranked),
-    bullCap(withOptions, options.maxBullShare),
+  const rankings = entries.map((e) => e.ranked);
+  const choice = assignBulls(rankings, bullCap(withOptions, options.maxBullShare));
+  const fromStock = assignStock(rankings, stock);
+  return entries.map((entry, i) =>
+    toPlan(entry, choice[i], options.top, fromStock.choice[i], fromStock.takenByOthers[i]),
   );
-  return entries.map((entry, i) => toPlan(entry, choice[i], options.top));
 }
 
 export type DoseNeed = { bull: Bull; doses: number; cows: string[] };

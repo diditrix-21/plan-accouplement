@@ -36,6 +36,7 @@ async function as(userId, fn) {
 // --- Simulation de l'environnement Supabase ---------------------------------
 await db.exec(`
   create role authenticated nologin;
+  create role anon nologin;
   create schema auth;
   create table auth.users (id uuid primary key, email text);
   create function auth.uid() returns uuid language sql stable
@@ -165,11 +166,35 @@ await as(ALICE, async () => {
   check("Alice, même administratrice, ne voit pas les taureaux perso de Bob", seen.rows[0].n === 0 && traits.rows[0].n === 0);
 });
 
+// Stock de doses : privé, jamais négatif, historique écrit par la fonction seulement
+await as(ALICE, async () => {
+  const bull = `(select id from public.bulls where name = 'EXEMPLE LAITIER')`;
+  const first = await db.query(`select public.adjust_semen_stock(${bull}, 3, 'stock_initial') as n`);
+  const after = await db.query(`select public.adjust_semen_stock(${bull}, -1, 'insemination') as n`);
+  check("Alice ajoute 3 doses puis en utilise une : il en reste 2", first.rows[0].n === 3 && after.rows[0].n === 2);
+  await expectError("le stock ne peut pas passer sous zéro", `select public.adjust_semen_stock(${bull}, -5, 'insemination');`);
+  await expectError("pas de dose retirée d'un taureau absent du stock",
+    `select public.adjust_semen_stock((select id from public.bulls where name = 'EXEMPLE SANTE'), -1, 'insemination');`);
+  const history = await db.query(`select count(*)::int as n from public.semen_movements`);
+  check("chaque changement est noté dans l'historique (et pas les refus)", history.rows[0].n === 2);
+  await expectError("l'historique ne s'écrit pas à la main",
+    `insert into public.semen_movements (farm_id, bull_id, delta, reason) select farm_id, bull_id, 1, 'achat' from public.semen_stock limit 1;`);
+  await expectError("Alice ne peut pas stocker le taureau perso de Bob",
+    `select public.adjust_semen_stock((select id from public.bulls where name = 'MON TORO'), 1, 'achat');`);
+});
+await as(BOB, async () => {
+  const seen = await db.query(`select (select count(*) from public.semen_stock)::int + (select count(*) from public.semen_movements)::int as n`);
+  check("Bob ne voit ni le stock ni l'historique d'Alice", seen.rows[0].n === 0);
+  await expectError("Bob ne peut pas écrire dans le stock d'Alice",
+    `insert into public.semen_stock (farm_id, bull_id, doses) values ((select id from public.farms limit 1), (select id from public.bulls where is_catalog limit 1), 9);`);
+});
+
 // Suppression en cascade
 await db.exec(`delete from auth.users where id = '${ALICE}';`);
 const leftovers = await db.query(`
   select (select count(*) from public.farms)::int + (select count(*) from public.cows)::int
-       + (select count(*) from public.cow_traits)::int + (select count(*) from public.breeding_goals)::int as n,
+       + (select count(*) from public.cow_traits)::int + (select count(*) from public.breeding_goals)::int
+       + (select count(*) from public.semen_stock)::int + (select count(*) from public.semen_movements)::int as n,
          (select count(*) from public.bulls where herdbook_id = 'CH 120.0000.0001.1' and is_catalog)::int as kept
 `);
 check(

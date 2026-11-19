@@ -249,3 +249,48 @@ export async function loadGoals(
 export function valuesByCode(rows: { trait_code: string; value: number }[]): Record<string, number> {
   return Object.fromEntries(rows.map((r) => [r.trait_code, Number(r.value)]));
 }
+
+export type StockRow = {
+  bull_id: string;
+  doses: number;
+  updated_at: string;
+  bull: {
+    id: string;
+    name: string;
+    full_name: string | null;
+    breed_code: string | null;
+    is_catalog: boolean;
+    supplier: { name: string } | null;
+    breed: { name: string } | null;
+  } | null;
+};
+
+/** Le container de l'éleveur : doses par taureau (les règles de la base cachent celui des autres). */
+export async function loadStock(supabase: Supabase): Promise<StockRow[]> {
+  const { data, error } = await supabase
+    .from("semen_stock")
+    .select(
+      "bull_id, doses, updated_at, bull:bulls(id, name, full_name, breed_code, is_catalog, supplier:suppliers(name), breed:breeds(name))",
+    );
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as unknown as StockRow[];
+  return rows.sort((a, b) => (a.bull?.name ?? "").localeCompare(b.bull?.name ?? ""));
+}
+
+export type MovementRow = {
+  id: string;
+  delta: number;
+  reason: "stock_initial" | "achat" | "insemination" | "correction";
+  created_at: string;
+  bull: { name: string } | null;
+};
+
+export async function loadMovements(supabase: Supabase, limit = 15): Promise<MovementRow[]> {
+  const { data, error } = await supabase
+    .from("semen_movements")
+    .select("id, delta, reason, created_at, bull:bulls(name)")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as unknown as MovementRow[];
+}

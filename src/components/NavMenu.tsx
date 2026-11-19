@@ -9,6 +9,7 @@ const NAV = [
   { href: "/vaches", label: "Mon troupeau", hint: "Mes vaches et leurs fiches" },
   { href: "/objectifs", label: "Mes objectifs", hint: "Ce que je veux améliorer" },
   { href: "/plan", label: "Plan d'accouplement", hint: "Le bon taureau pour chaque vache" },
+  { href: "/stock", label: "Stock", hint: "Les doses de mon container" },
   { href: "/taureaux", label: "Taureaux", hint: "Le catalogue et mes taureaux" },
 ];
 

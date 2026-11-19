@@ -4,6 +4,7 @@ import {
   loadBulls,
   loadCows,
   loadGoals,
+  loadStock,
   loadTraits,
   valuesByCode,
   type BullRow,
@@ -53,12 +54,16 @@ function toBull(row: BullRow): Bull {
 /** Charge le troupeau, le catalogue et les objectifs, puis calcule le plan. */
 export async function buildPlan(supabase: Supabase) {
   const farm = await getFarm(supabase);
-  const [traitRows, cowRows, goals, breeds] = await Promise.all([
+  const [traitRows, cowRows, goals, breeds, stockRows] = await Promise.all([
     loadTraits(supabase),
     loadCows(supabase, farm.id),
     loadGoals(supabase, farm.id),
     loadBreeds(supabase),
+    loadStock(supabase),
   ]);
+  const stock = Object.fromEntries(
+    stockRows.filter((row) => row.doses > 0).map((row) => [row.bull_id, row.doses]),
+  ) as Record<string, number>;
 
   // Le catalogue compte plus de mille taureaux : on ne charge que ceux des
   // races utilisables sur le troupeau (même race, même couleur en Holstein).
@@ -81,10 +86,12 @@ export async function buildPlan(supabase: Supabase) {
     ...DEFAULT_OPTIONS,
     heiferMinCalvingEase: Number(farm.heifer_min_calving_ease),
     maxBullShare: Number(farm.max_bull_share),
-  });
+  }, stock);
 
   return {
     farm,
+    stock,
+    stockDoses: Object.values(stock).reduce((sum, n) => sum + n, 0),
     breedNames: Object.fromEntries(breeds.map((b) => [b.code, b.name])) as Record<string, string>,
     cowCount: cowRows.length,
     bullCount: bullRows.length,

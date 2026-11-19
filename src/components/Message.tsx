@@ -16,6 +16,11 @@ const MESSAGES: Record<string, { text: string; kind: string }> = {
     text: "Ce fichier n'est pas une liste des animaux swissherdbook (il faut au moins les colonnes « N° BDTA » et « Nom »).",
     kind: "notice-error",
   },
+  stock_empty: {
+    text: "Plus de dose de ce taureau dans le container.",
+    kind: "notice-error",
+  },
+  stock_quantity: { text: "Indique un nombre de doses entre 1 et 999.", kind: "notice-error" },
   farmname: { text: "Le nom de l'exploitation est obligatoire.", kind: "notice-error" },
   admin: {
     text: "Seul l'administrateur du catalogue peut importer ou modifier le catalogue officiel.",

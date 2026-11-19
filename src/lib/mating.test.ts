@@ -124,6 +124,35 @@ describe("accouplement correctif", () => {
   });
 });
 
+describe("stock du container", () => {
+  const goals = { lait_kg: 3 };
+  const strong = bull({ id: "fort", name: "FORT", values: { lait_kg: 1000 } });
+  const medium = bull({ id: "moyen", name: "MOYEN", values: { lait_kg: 300 } });
+  const weakCow = cow({ id: "faible", name: "Faible", values: { lait_kg: -800 } });
+  const goodCow = cow({ id: "bonne", name: "Bonne", values: { lait_kg: 600 } });
+
+  it("propose la meilleure dose en stock à côté de la meilleure du marché", () => {
+    const [plan] = planForHerd([goodCow], [strong, medium], traits, goals, DEFAULT_OPTIONS, { moyen: 2 });
+    expect(plan.chosen?.bull.name).toBe("FORT");
+    expect(plan.fromStock?.bull.name).toBe("MOYEN");
+    expect(plan.fromStockRank).toBe(2);
+  });
+
+  it("donne la dernière dose à la vache qui en profite le plus", () => {
+    const plans = planForHerd([goodCow, weakCow], [strong], traits, goals, DEFAULT_OPTIONS, { fort: 1 });
+    const byName = Object.fromEntries(plans.map((p) => [p.cow.name, p]));
+    expect(byName.Faible.fromStock?.bull.name).toBe("FORT");
+    expect(byName.Bonne.fromStock).toBeNull();
+    expect(byName.Bonne.stockTakenByOthers).toBe(true);
+  });
+
+  it("ne propose rien du stock sans doses compatibles", () => {
+    const [plan] = planForHerd([goodCow], [strong], traits, goals, DEFAULT_OPTIONS, {});
+    expect(plan.fromStock).toBeNull();
+    expect(plan.stockTakenByOthers).toBe(false);
+  });
+});
+
 describe("race et couleur", () => {
   const goals = { lait_kg: 3 };
   const red = cow({ breedCode: "RH" });
