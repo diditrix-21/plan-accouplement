@@ -11,6 +11,7 @@ import {
 } from "@/lib/data";
 import {
   DEFAULT_OPTIONS,
+  allowedBullBreeds,
   bullCap,
   dosesNeeded,
   planForHerd,
@@ -26,6 +27,7 @@ function toCow(row: CowRow): Cow {
   return {
     id: row.id,
     name: row.name,
+    breedCode: row.breed_code,
     breedGroup: row.breed?.breed_group ?? null,
     sireName: row.sire_name,
     mgsName: row.mgs_name,
@@ -38,6 +40,7 @@ function toBull(row: BullRow): Bull {
   return {
     id: row.id,
     name: row.name,
+    breedCode: row.breed_code,
     breedGroup: row.breed?.breed_group ?? null,
     sireName: row.sire_name,
     mgsName: row.mgs_name,
@@ -50,17 +53,16 @@ function toBull(row: BullRow): Bull {
 /** Charge le troupeau, le catalogue et les objectifs, puis calcule le plan. */
 export async function buildPlan(supabase: Supabase) {
   const farm = await getFarm(supabase);
-  const [traitRows, cowRows, breeds, goals] = await Promise.all([
+  const [traitRows, cowRows, goals, breeds] = await Promise.all([
     loadTraits(supabase),
     loadCows(supabase, farm.id),
-    loadBreeds(supabase),
     loadGoals(supabase, farm.id),
+    loadBreeds(supabase),
   ]);
 
   // Le catalogue compte plus de mille taureaux : on ne charge que ceux des
-  // races (et races apparentées) présentes dans le troupeau.
-  const herdGroups = new Set(cowRows.map((c) => c.breed?.breed_group).filter(Boolean));
-  const breedCodes = breeds.filter((b) => herdGroups.has(b.breed_group)).map((b) => b.code);
+  // races utilisables sur le troupeau (même race, même couleur en Holstein).
+  const breedCodes = [...new Set(cowRows.flatMap((c) => allowedBullBreeds(c.breed_code)))];
   const bullRows = await loadBulls(supabase, { breedCodes });
 
   const traits: Trait[] = traitRows.map((t) => ({
@@ -83,6 +85,7 @@ export async function buildPlan(supabase: Supabase) {
 
   return {
     farm,
+    breedNames: Object.fromEntries(breeds.map((b) => [b.code, b.name])) as Record<string, string>,
     cowCount: cowRows.length,
     bullCount: bullRows.length,
     hasExampleBulls: bullRows.some((b) => b.is_example),

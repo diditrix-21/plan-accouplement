@@ -37,6 +37,7 @@ function Recommendation({ rank, pair, chosen }: { rank: number; pair: PairScore;
           {formatNumber(pair.score)}
         </p>
       </div>
+      {pair.calfCoat && <p className="mt-1 text-sm text-stone-600">Couleur : {pair.calfCoat}</p>}
       {pair.strengths.length > 0 && (
         <p className="mt-1 text-sm text-stone-700">
           <span className="font-medium text-green-800">Apporte :</span> {labels(pair.strengths)}
@@ -61,7 +62,38 @@ function Recommendation({ rank, pair, chosen }: { rank: number; pair: PairScore;
   );
 }
 
-function CowCard({ plan }: { plan: CowPlan }) {
+function NoRanking({ plan, breedName }: { plan: CowPlan; breedName: string | null }) {
+  const edit = (
+    <Link href={`/vaches?edit=${plan.cow.id}`} className="font-medium text-brand hover:underline">
+      choisis sa race
+    </Link>
+  );
+  if (plan.note === "breed_unknown") {
+    return (
+      <p className="notice mt-3">
+        Race {plan.cow.breedCode === "XX" ? "« croisement / autres »" : "inconnue"} : pas de
+        proposition, pour ne pas mettre une autre race sur cette vache. {edit} dans sa fiche.
+      </p>
+    );
+  }
+  if (plan.note === "no_bull") {
+    return (
+      <p className="notice mt-3">Aucun taureau {breedName ?? plan.cow.breedCode} dans le catalogue.</p>
+    );
+  }
+  return (
+    <p className="notice mt-3">
+      {plan.candidates} taureau(x) {breedName ?? plan.cow.breedCode} au catalogue, mais sans valeurs
+      d&apos;élevage : impossible de les classer.{" "}
+      <Link href={`/taureaux?race=${plan.cow.breedCode}`} className="font-medium text-brand hover:underline">
+        Voir ces taureaux
+      </Link>{" "}
+      pour choisir sur leur fiche.
+    </p>
+  );
+}
+
+function CowCard({ plan, breedName }: { plan: CowPlan; breedName: string | null }) {
   return (
     <section className="card scroll-mt-24" id={`vache-${plan.cow.id}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -74,13 +106,28 @@ function CowCard({ plan }: { plan: CowPlan }) {
               Génisse
             </span>
           )}
+          <span className="ml-2 text-sm font-normal text-stone-500">
+            {breedName ?? plan.cow.breedCode ?? "race inconnue"}
+          </span>
         </h2>
         {plan.weaknesses.length > 0 && (
           <p className="text-sm text-stone-600">À corriger : {plan.weaknesses.join(", ")}</p>
         )}
       </div>
 
-      {plan.recommendations.length === 0 ? (
+      {plan.note === null && !plan.cowHasData && (
+        <p className="mt-2 text-sm text-stone-600">
+          Aucun chiffre pour cette vache : les taureaux sont classés selon tes objectifs seulement.{" "}
+          <Link href={`/vaches?edit=${plan.cow.id}`} className="text-brand hover:underline">
+            Indique ses points faibles
+          </Link>{" "}
+          pour que le plan les corrige.
+        </p>
+      )}
+
+      {plan.note !== null ? (
+        <NoRanking plan={plan} breedName={breedName} />
+      ) : plan.recommendations.length === 0 ? (
         <p className="notice mt-3">Aucun taureau du catalogue ne convient à cette vache.</p>
       ) : (
         <ol className="mt-3 space-y-2">
@@ -185,6 +232,54 @@ function Missing({ text, href, action }: { text: string; href: string; action: s
   );
 }
 
+/** Explication du choix, en langage d'éleveur. */
+function HowItWorks() {
+  return (
+    <details className="card text-sm leading-6 text-stone-700">
+      <summary className="cursor-pointer font-semibold text-stone-900">
+        Comment le plan choisit le taureau
+      </summary>
+      <ol className="mt-3 list-decimal space-y-2 pl-5">
+        <li>
+          <strong>Même race, même couleur.</strong> Une Holstein noire reçoit un taureau noir (HO
+          ou facteur rouge), une Red Holstein un taureau rouge, une Simmental un Simmental… Une
+          vache sans race connue ne reçoit rien.
+        </li>
+        <li>
+          <strong>On regarde le veau, pas le taureau seul.</strong> Pour chaque critère, le veau
+          attendu vaut la moyenne de la vache et du taureau.
+        </li>
+        <li>
+          <strong>Les défauts comptent double.</strong> Un veau sous la moyenne sur un critère
+          coûte deux fois plus cher qu&apos;un veau au-dessus ne rapporte. Sur une vache faible en
+          cellules, un taureau fort en cellules gagne donc beaucoup de points ; sur une vache
+          déjà bonne en cellules, ce même taureau rapporte peu, et un taureau fort ailleurs passe
+          devant.
+        </li>
+        <li>
+          <strong>Tes objectifs donnent le poids</strong> de chaque critère (0 à 5). Le score
+          compare le taureau à un taureau moyen (0).
+        </li>
+        <li>
+          <strong>Sécurités :</strong> pas de père ni de grand-père maternel de la vache, pas de
+          vêlage difficile sur une génisse, pas plus de 30 % du troupeau (réglable) sur le même
+          taureau.
+        </li>
+      </ol>
+      <p className="mt-3 rounded-lg bg-amber-50 p-3 text-amber-900">
+        Sans chiffres sur une vache, le plan ne connaît pas ses défauts : il prend alors
+        simplement les taureaux les meilleurs pour tes objectifs. Pour qu&apos;il corrige vraiment,
+        indique les points faibles de la vache dans sa fiche (Modifier), ou importe ses valeurs
+        d&apos;élevage.
+      </p>
+      <p className="mt-2 text-xs text-stone-500">
+        Le contrôle de parenté ne regarde que le père et le grand-père maternel : ce n&apos;est pas un
+        calcul de consanguinité.
+      </p>
+    </details>
+  );
+}
+
 export default async function PlanPage() {
   const { supabase } = await requireUser();
   const plan = await buildPlan(supabase);
@@ -235,18 +330,16 @@ export default async function PlanPage() {
 
       {plan.activeGoals.length > 0 && plan.doses.length > 0 && <Order doses={plan.doses} cap={plan.cap} />}
 
-      {plan.activeGoals.length > 0 && plan.plans.map((cowPlan) => <CowCard key={cowPlan.cow.id} plan={cowPlan} />)}
+      {plan.activeGoals.length > 0 &&
+        plan.plans.map((cowPlan) => (
+          <CowCard
+            key={cowPlan.cow.id}
+            plan={cowPlan}
+            breedName={cowPlan.cow.breedCode ? (plan.breedNames[cowPlan.cow.breedCode] ?? null) : null}
+          />
+        ))}
 
-      {plan.cowCount > 0 && plan.activeGoals.length > 0 && (
-        <p className="text-xs leading-5 text-stone-500">
-          Comment c&apos;est calculé : le veau attendu vaut la moyenne de ses deux parents sur chaque
-          critère ; un veau sous la moyenne coûte deux fois plus qu&apos;un veau au-dessus ne
-          rapporte, ce qui pousse à corriger les points faibles de chaque vache. Le score compare
-          le taureau à un taureau moyen (0). Quand un taureau atteint sa part maximale du
-          troupeau, il reste sur les vaches qui perdraient le plus à en changer. Le contrôle de parenté ne regarde que le père et le
-          grand-père maternel saisis : ce n&apos;est pas un calcul de consanguinité.
-        </p>
-      )}
+      {plan.cowCount > 0 && <HowItWorks />}
     </div>
   );
 }

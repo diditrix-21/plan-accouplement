@@ -13,6 +13,8 @@
  *    cellules, au lieu de proposer le même taureau à tout le troupeau.
  * 4. Le score d'un couple = gain pondéré par les objectifs de l'éleveur,
  *    par rapport à un taureau moyen.
+ * 5. On reste dans la race de la vache. En Holstein, on garde aussi la
+ *    couleur : noir sur noir (HO, RF), rouge sur rouge (RH).
  */
 
 export type Trait = {
@@ -27,6 +29,8 @@ export type Trait = {
 type Animal = {
   id: string;
   name: string;
+  /** Code de race (HO, RH, SI…). Null = inconnue. */
+  breedCode: string | null;
   breedGroup: string | null;
   sireName: string | null;
   /** Grand-père maternel */
@@ -72,6 +76,8 @@ export type Contribution = { code: string; label: string; points: number };
 
 export type PairScore = {
   bull: Bull;
+  /** Couleur attendue du veau (Holstein noir / rouge), sinon null. */
+  calfCoat: string | null;
   /** Score global, 0 = équivalent à un taureau moyen. */
   score: number;
   /** Critères où le taureau apporte le plus, du plus fort au plus faible. */
@@ -85,8 +91,22 @@ export type PairScore = {
 
 export type Exclusion = { bull: Bull; reason: string };
 
+/**
+ * Pourquoi une vache n'a pas de classement :
+ * - breed_unknown : race inconnue ou « croisement / autres » (XX) ;
+ * - no_bull : aucun taureau de sa race au catalogue ;
+ * - no_data : des taureaux de sa race existent, mais sans valeurs d'élevage
+ *   (races à viande) : impossible de les classer.
+ */
+export type PlanNote = "breed_unknown" | "no_bull" | "no_data" | null;
+
 export type CowPlan = {
   cow: Cow;
+  note: PlanNote;
+  /** Taureaux de la bonne race au catalogue (avant parenté et règle génisses). */
+  candidates: number;
+  /** La vache a au moins une valeur (ou un « faible ») sur un critère pondéré. */
+  cowHasData: boolean;
   /** Critères pondérés où la vache est nettement sous la moyenne. */
   weaknesses: string[];
   recommendations: PairScore[];
@@ -153,6 +173,45 @@ export function checkKinship(cow: Cow, bull: Bull): Kinship {
   return { level: "none" };
 }
 
+/** Génotype couleur en Holstein : BB noir, Br noir porteur du rouge, rr rouge. */
+const HOLSTEIN_COAT: Record<string, "BB" | "Br" | "rr"> = { HO: "BB", RF: "Br", RH: "rr" };
+
+/** Races de taureau acceptées pour une vache : même race, et même couleur en Holstein. */
+export function allowedBullBreeds(cowBreed: string | null): string[] {
+  if (!cowBreed || cowBreed === "XX") return [];
+  const coat = HOLSTEIN_COAT[cowBreed];
+  if (coat === "rr") return ["RH"];
+  if (coat) return ["HO", "RF"];
+  return [cowBreed];
+}
+
+/**
+ * Couleur attendue du veau en Holstein. Le noir domine le rouge : un veau
+ * n'est rouge que s'il reçoit le rouge de ses deux parents.
+ * Une vache HO peut porter le rouge sans qu'on le sache : on le signale.
+ */
+export function calfCoat(cowBreed: string | null, bullBreed: string | null): string | null {
+  const cow = cowBreed ? HOLSTEIN_COAT[cowBreed] : undefined;
+  const bull = bullBreed ? HOLSTEIN_COAT[bullBreed] : undefined;
+  if (!cow || !bull) return null;
+  const cowKnown = cowBreed !== "HO";
+
+  if (cow === "rr") {
+    if (bull === "rr") return "veau rouge";
+    if (bull === "Br") return "50 % rouge, 50 % noir porteur du rouge";
+    return "veau noir, porteur du facteur rouge";
+  }
+  if (cow === "Br" && cowKnown) {
+    if (bull === "rr") return "50 % rouge, 50 % noir porteur du rouge";
+    if (bull === "Br") return "25 % rouge, 75 % noir";
+    return "veau noir (1 sur 2 porteur du rouge)";
+  }
+  // Vache HO : porteuse ou non, on ne le sait pas.
+  if (bull === "rr") return "veau noir porteur du rouge (50 % rouge si la vache est porteuse)";
+  if (bull === "Br") return "veau noir (25 % rouge si la vache est porteuse)";
+  return "veau noir";
+}
+
 type Evaluation = { excluded: true; reason: string } | { excluded: false; result: PairScore };
 
 export function scorePair(
@@ -162,12 +221,15 @@ export function scorePair(
   goals: Goals,
   options: Options = DEFAULT_OPTIONS,
 ): Evaluation {
-  if (
-    !options.allowCrossbreeding &&
-    cow.breedGroup &&
-    bull.breedGroup &&
-    cow.breedGroup !== bull.breedGroup
-  ) {
+  if (!options.allowCrossbreeding && !allowedBullBreeds(cow.breedCode).includes(bull.breedCode ?? "")) {
+    const cowCoat = cow.breedCode ? HOLSTEIN_COAT[cow.breedCode] : undefined;
+    const bullCoat = bull.breedCode ? HOLSTEIN_COAT[bull.breedCode] : undefined;
+    if (cowCoat && bullCoat) {
+      return {
+        excluded: true,
+        reason: cowCoat === "rr" ? "taureau noir sur vache rouge" : "taureau rouge sur vache noire",
+      };
+    }
     return { excluded: true, reason: "autre race" };
   }
 
@@ -227,6 +289,7 @@ export function scorePair(
     excluded: false,
     result: {
       bull,
+      calfCoat: calfCoat(cow.breedCode, bull.breedCode),
       score,
       strengths: contributions
         .filter((c) => c.points > threshold)
@@ -251,26 +314,44 @@ function rankForCow(
   goals: Goals,
   options: Options,
 ): RankedCow {
-  const ranked: PairScore[] = [];
-  const exclusions: Exclusion[] = [];
-
-  for (const bull of bulls) {
-    const evaluation = scorePair(cow, bull, traits, goals, options);
-    if (evaluation.excluded) exclusions.push({ bull, reason: evaluation.reason });
-    else ranked.push(evaluation.result);
-  }
-
-  ranked.sort((a, b) => b.score - a.score || a.bull.name.localeCompare(b.bull.name));
-
-  const weaknesses = traits
-    .filter((t) => (goals[t.code] ?? 0) > 0)
+  const weighted = traits.filter((t) => (goals[t.code] ?? 0) > 0);
+  const cowHasData = weighted.some((t) => cow.values[t.code] !== undefined);
+  const weaknesses = weighted
     .filter((t) => {
       const value = cow.values[t.code];
       return value !== undefined && standardize(t, value) <= -0.5;
     })
     .map((t) => t.label);
+  const base = { cow, weaknesses, cowHasData };
 
-  return { cow, weaknesses, ranked, exclusions };
+  if (!options.allowCrossbreeding && allowedBullBreeds(cow.breedCode).length === 0) {
+    return { ...base, note: "breed_unknown", candidates: 0, ranked: [], exclusions: [] };
+  }
+
+  // Autre race ou autre couleur : écartés sans les lister (il y en a des centaines).
+  const sameBreed = options.allowCrossbreeding
+    ? bulls
+    : bulls.filter((b) => allowedBullBreeds(cow.breedCode).includes(b.breedCode ?? ""));
+  if (sameBreed.length === 0) {
+    return { ...base, note: "no_bull", candidates: 0, ranked: [], exclusions: [] };
+  }
+
+  // Taureaux sans aucune valeur sur les critères choisis : impossibles à classer.
+  const informative = sameBreed.filter((b) => weighted.some((t) => b.values[t.code] !== undefined));
+  if (weighted.length > 0 && informative.length === 0) {
+    return { ...base, note: "no_data", candidates: sameBreed.length, ranked: [], exclusions: [] };
+  }
+
+  const ranked: PairScore[] = [];
+  const exclusions: Exclusion[] = [];
+  for (const bull of sameBreed) {
+    const evaluation = scorePair(cow, bull, traits, goals, options);
+    if (evaluation.excluded) exclusions.push({ bull, reason: evaluation.reason });
+    else ranked.push(evaluation.result);
+  }
+  ranked.sort((a, b) => b.score - a.score || a.bull.name.localeCompare(b.bull.name));
+
+  return { ...base, note: null, candidates: sameBreed.length, ranked, exclusions };
 }
 
 function toPlan(entry: RankedCow, chosenIndex: number | null, top: number): CowPlan {

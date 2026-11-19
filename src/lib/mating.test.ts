@@ -13,6 +13,8 @@ import {
   type Bull,
   type Cow,
   type Trait,
+  allowedBullBreeds,
+  calfCoat,
 } from "./mating";
 
 const traits: Trait[] = [
@@ -25,6 +27,7 @@ function cow(partial: Partial<Cow> = {}): Cow {
   return {
     id: "c1",
     name: "Bella",
+    breedCode: "HO",
     breedGroup: "holstein",
     sireName: null,
     mgsName: null,
@@ -38,6 +41,7 @@ function bull(partial: Partial<Bull> = {}): Bull {
   return {
     id: "b1",
     name: "TORO",
+    breedCode: "HO",
     breedGroup: "holstein",
     sireName: null,
     mgsName: null,
@@ -120,16 +124,64 @@ describe("accouplement correctif", () => {
   });
 });
 
+describe("race et couleur", () => {
+  const goals = { lait_kg: 3 };
+  const red = cow({ breedCode: "RH" });
+
+  it("ne met que des taureaux rouges sur une vache rouge", () => {
+    expect(allowedBullBreeds("RH")).toEqual(["RH"]);
+    expect(scorePair(red, bull({ breedCode: "HO" }), traits, goals)).toEqual({
+      excluded: true,
+      reason: "taureau noir sur vache rouge",
+    });
+    expect(scorePair(red, bull({ breedCode: "RF" }), traits, goals).excluded).toBe(true);
+    expect(scorePair(red, bull({ breedCode: "RH" }), traits, goals).excluded).toBe(false);
+  });
+
+  it("ne met que des taureaux noirs sur une vache noire", () => {
+    expect(allowedBullBreeds("HO")).toEqual(["HO", "RF"]);
+    expect(scorePair(cow(), bull({ breedCode: "RH" }), traits, goals)).toEqual({
+      excluded: true,
+      reason: "taureau rouge sur vache noire",
+    });
+  });
+
+  it("reste dans la race pour les autres races, et ne propose rien sans race", () => {
+    expect(allowedBullBreeds("SI")).toEqual(["SI"]);
+    expect(allowedBullBreeds(null)).toEqual([]);
+    expect(allowedBullBreeds("XX")).toEqual([]);
+    const plan = planForCow(cow({ breedCode: null }), [bull()], traits, goals);
+    expect(plan.note).toBe("breed_unknown");
+    expect(plan.recommendations).toEqual([]);
+  });
+
+  it("ne classe pas des taureaux sans aucune valeur (races à viande)", () => {
+    const plan = planForCow(cow({ breedCode: "PI" }), [bull({ breedCode: "PI" })], traits, goals);
+    expect(plan.note).toBe("no_data");
+    expect(plan.candidates).toBe(1);
+    expect(plan.recommendations).toEqual([]);
+  });
+
+  it("calcule la couleur du veau (le noir domine le rouge)", () => {
+    expect(calfCoat("RH", "RH")).toBe("veau rouge");
+    expect(calfCoat("RH", "HO")).toBe("veau noir, porteur du facteur rouge");
+    expect(calfCoat("RH", "RF")).toBe("50 % rouge, 50 % noir porteur du rouge");
+    expect(calfCoat("RF", "RF")).toBe("25 % rouge, 75 % noir");
+    expect(calfCoat("HO", "HO")).toBe("veau noir");
+    expect(calfCoat("SI", "SI")).toBeNull();
+  });
+});
+
 describe("exclusions", () => {
   const goals = { lait_kg: 3 };
 
   it("écarte un taureau d'une autre race", () => {
-    const evaluation = scorePair(cow(), bull({ breedGroup: "brune" }), traits, goals);
+    const evaluation = scorePair(cow(), bull({ breedCode: "BS", breedGroup: "brune" }), traits, goals);
     expect(evaluation).toEqual({ excluded: true, reason: "autre race" });
   });
 
   it("garde un taureau d'une autre race si le croisement est autorisé", () => {
-    const evaluation = scorePair(cow(), bull({ breedGroup: "brune" }), traits, goals, {
+    const evaluation = scorePair(cow(), bull({ breedCode: "BS", breedGroup: "brune" }), traits, goals, {
       ...DEFAULT_OPTIONS,
       allowCrossbreeding: true,
     });
